@@ -2,10 +2,10 @@ const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 const connectDB = require("./config/db");
-
+const authRoutes = require("./routes/authRoutes");
+const memoryRoutes = require("./routes/memoryRoutes");
 connectDB();
 
-const authRoutes = require("./routes/authRoutes");
 
 const app = express();
 
@@ -17,6 +17,7 @@ app.use(express.json());
 app.use(morgan("dev"));
 
 app.use("/api/auth", authRoutes);
+app.use("/api/memories", memoryRoutes);
 // Test route
 app.get("/", (req, res) => {
   res.status(200).json({
