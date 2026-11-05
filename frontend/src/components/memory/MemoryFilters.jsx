@@ -18,27 +18,27 @@ export default function MemoryFilters({ filters, onChange, stats }) {
 
   return (
     <div className="card space-y-4 p-4 sm:p-5">
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-3 lg:flex-row">
         <div className="relative flex-1">
           <Icon name="search" className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input ref={searchRef} value={filters.q} onChange={(e) => set({ q: e.target.value })} className="field pl-10" placeholder="Search by title, person, event, project or year  (press /)" aria-label="Search memories" />
         </div>
-        <select value={filters.batch} onChange={(e) => set({ batch: e.target.value })} className="field sm:w-40" aria-label="Filter by batch">
+
+        <select value={filters.year} onChange={(e) => set({ year: e.target.value })} className="field lg:w-40" aria-label="Filter by year">
+          <option value="">All years</option>
+          {YEARS.map((y) => (
+            <option key={y} value={y}>{y}{stats?.years?.[y] ? ` (${stats.years[y]})` : ''}</option>
+          ))}
+        </select>
+
+        <select value={filters.batch} onChange={(e) => set({ batch: e.target.value })} className="field lg:w-40" aria-label="Filter by batch">
           <option value="">All batches</option>
           {BATCHES.map((b) => <option key={b}>{b}</option>)}
         </select>
+
         <button onClick={() => set({ sort: filters.sort === 'desc' ? 'asc' : 'desc' })} className="chip justify-center" aria-label="Change order">
           <Icon name="sort" className="h-4 w-4" /> {filters.sort === 'desc' ? 'Newest first' : 'Oldest first'}
         </button>
-      </div>
-
-      <div className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-        <button className={`chip ${!filters.year ? 'chip-on' : ''}`} onClick={() => set({ year: '' })}>All years</button>
-        {YEARS.map((y) => (
-          <button key={y} className={`chip ${String(filters.year) === String(y) ? 'chip-on' : ''}`} onClick={() => set({ year: filters.year === y ? '' : y })}>
-            {y}{stats?.years?.[y] ? <span className="text-xs opacity-60">{stats.years[y]}</span> : null}
-          </button>
-        ))}
       </div>
 
       <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1">
