@@ -1,16 +1,49 @@
-# React + Vite
+# Campus Digital Memory — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite + Tailwind CSS. Works fully **without a backend** (built-in mock server in `localStorage`), so you can demo it today and plug in the real API later.
 
-Currently, two official plugins are available:
+## Run
+```bash
+npm install
+npm run dev        # http://localhost:5173
+```
+Demo logins: `student@campus.com / student123` and `admin@campus.com / admin123`.
+Tip: open two tabs (student + admin) to see real-time updates, duplicate alerts and live date changes.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Features
+- Year-wise timeline with sticky giant year headers, alternating cards, photo galleries
+- Search (title, person, event, project, year, tags), year / batch / type filters, sort order
+- Memory submission with live preview, photo upload (compressed in the browser), tags, related event/project
+- Live duplicate detection while typing + flagged for admins on submit
+- Admin review queue: approve / reject with reason / edit date or year (published changes reach all users instantly)
+- My Submissions with pending / approved / rejected tabs and admin notes
+- Likes, shareable links (`/?m=<id>`), dark mode, toasts, 404 page, error boundary
+- Fully responsive (mobile, tablet, desktop)
 
-## React Compiler
+## Built for many users
+- Server-side pagination + infinite scroll (never loads the whole archive)
+- Debounced search, stale-response cancellation, debounced live refresh (one request, not one per event)
+- Route-level code splitting, lazy images, `React.memo` cards
+- Client-side image compression, axios retry with backoff on 429/503
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Connecting the real backend
+1. `.env` → `VITE_USE_MOCK=false`, set `VITE_API_URL` (and `VITE_SOCKET_URL`)
+2. Backend routes expected by `src/api/`:
 
-## Expanding the ESLint configuration
+| Method | Route | Notes |
+|---|---|---|
+| POST | `/auth/login`, `/auth/register` | returns `{ token, user }` |
+| GET | `/auth/me` | `{ user }` |
+| GET | `/memories` | query: `q, year, batch, type, sort, page, limit` → `{ items, total, hasMore }` |
+| GET | `/memories/stats` | `{ total, contributors, years: { 2023: 4 } }` |
+| GET | `/memories/:id` | |
+| POST | `/memories` | multipart: fields + `images[]` → `{ memory, duplicates }` |
+| POST | `/memories/check-duplicates` | `{ title, description, year }` → array |
+| GET | `/memories/mine` | |
+| POST | `/memories/:id/like` | `{ liked, likesCount }` |
+| GET | `/admin/memories?status=&page=` | `{ items, total, hasMore, counts }` |
+| PATCH | `/admin/memories/:id/review` | `{ status, reason }` |
+| PATCH | `/admin/memories/:id` | `{ year, eventDate }` |
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+3. Real-time: edit only `src/utils/realtime.js` to use `socket.io-client`. Events: `memory:new`, `memory:duplicate`, `memory:published`, `memory:updated`, `memory:reviewed`.
+4. Delete `src/api/mockServer.js`.
