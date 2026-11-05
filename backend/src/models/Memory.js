@@ -42,24 +42,29 @@ const memorySchema = new mongoose.Schema(
     }],
 
     media: [
-      {
-        url: {
-          type: String,
-          required: true
-        },
+  {
+    url: {
+      type: String,
+      required: true
+    },
 
-        type: {
-          type: String,
-          enum: ["image", "video"],
-          required: true
-        },
+    public_id: {
+    type: String,
+    required: true
+},
 
-        altText: {
-          type: String,
-          trim: true
-        }
-      }
-    ],
+    type: {
+      type: String,
+      enum: ["image", "video"],
+      required: true
+    },
+
+    altText: {
+      type: String,
+      trim: true
+    }
+  }
+],
 
     submittedBy: {
       type: mongoose.Schema.Types.ObjectId,
