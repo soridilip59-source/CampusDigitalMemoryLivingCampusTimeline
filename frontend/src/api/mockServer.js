@@ -6,6 +6,7 @@
 import { STATUS, ROLES, TOKEN_KEY, PAGE_SIZE, START_YEAR } from '../utils/constants';
 import { uid, similarity, normalize } from '../utils/helpers';
 import { realtime, EV } from '../utils/realtime';
+import { getDb, tx } from './idb';
 
 const KEY = 'cdm_db_v1';
 export const delay = (ms = 220) => new Promise((r) => setTimeout(r, ms));
@@ -25,11 +26,13 @@ const mk = (i, year, type, title, description, who, tags, related, likes) => ({
   contributor: { id: `p_${who}`, name: PEOPLE[who] },
   status: STATUS.APPROVED,
   likes: Array.from({ length: likes }, (_, k) => `seed_${k}`),
+  likeEvents: [], comments: [], reactions: { '❤️': [], '😂': [], '😢': [], '🔥': [] }, featured: false,
   createdAt: new Date(Date.UTC(year, i % 9, 15)).toISOString(),
   duplicateOf: null, rejectReason: null,
 });
 
 const seed = () => ({
+  notifications: [],
   users: [
     { id: 'u_admin', name: 'Campus Admin', email: 'admin@campus.com', password: 'admin123', role: ROLES.ADMIN, batch: 'Staff' },
     { id: 'u_demo', name: 'Demo Student', email: 'student@campus.com', password: 'student123', role: ROLES.STUDENT, batch: 'Batch 2024' },
@@ -51,16 +54,8 @@ const seed = () => ({
 });
 
 /* ---------------- storage ---------------- */
-const read = () => {
-  try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch { /* fall through */ }
-  const d = seed();
-  try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* ignore */ }
-  return d;
-};
-const write = (db) => {
-  try { localStorage.setItem(KEY, JSON.stringify(db)); }
-  catch { throw fail('Browser storage is full. Try fewer or smaller photos.'); }
-};
+const read = () => getDb(seed, KEY);
+const write = (db) => tx(() => db);
 
 const session = (db) => db.users.find((u) => u.id === localStorage.getItem(TOKEN_KEY)) || null;
 const requireUser = (db) => session(db) || (() => { throw fail('Please log in first', 401); })();
@@ -71,32 +66,40 @@ const requireAdmin = (db) => {
 };
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, batch: u.batch });
 const toClient = (m, userId) => {
-  const { likes, ...rest } = m;
-  return { ...rest, likesCount: likes.length, liked: userId ? likes.includes(userId) : false };
+  const { likes = [], reactions = { '❤️': [], '😂': [], '😢': [], '🔥': [] }, ...rest } = m;
+  const reactionCounts = Object.fromEntries(Object.entries(reactions).map(([emoji, users]) => [emoji, users.length]));
+  return { ...rest, reactions, reactionCounts, myReaction: userId ? Object.keys(reactions).find((emoji) => reactions[emoji].includes(userId)) || null : null, comments: rest.comments || [], likesCount: likes.length, liked: userId ? likes.includes(userId) : false };
+};
+const notify = (db, recipientId, payload) => {
+  if (!recipientId || recipientId === payload.actorId) return;
+  const item = { id: uid('n'), userId: recipientId, read: false, createdAt: new Date().toISOString(), ...payload };
+  (db.notifications ||= []).unshift(item);
+  realtime.emit(EV.NOTIFY, item);
 };
 const dateKey = (m) => m.eventDate || m.createdAt;
 
 /* ---------------- auth ---------------- */
 export async function login({ email, password }) {
   await delay();
-  const u = read().users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase() && x.password === password);
+  const db = await read();
+  const u = db.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase() && x.password === password);
   if (!u) throw fail('Wrong email or password', 401);
   return { token: u.id, user: publicUser(u) };
 }
 
 export async function register({ name, email, password, batch }) {
   await delay();
-  const db = read();
+  const db = await read();
   if (db.users.some((u) => u.email.toLowerCase() === email.trim().toLowerCase())) throw fail('An account with this email already exists', 409);
   const u = { id: uid('u'), name: name.trim(), email: email.trim(), password, role: ROLES.STUDENT, batch };
   db.users.push(u);
-  write(db);
+  await write(db);
   return { token: u.id, user: publicUser(u) };
 }
 
 export async function me() {
   await delay(80);
-  const u = session(read());
+  const u = session(await read());
   if (!u) throw fail('Session expired', 401);
   return { user: publicUser(u) };
 }
@@ -118,13 +121,13 @@ export function findDuplicates(db, { title = '', description = '', year }, exclu
 
 export async function checkDuplicates(payload) {
   await delay(120);
-  return findDuplicates(read(), payload);
+  return findDuplicates(await read(), payload);
 }
 
 /* ---------------- memories ---------------- */
 export async function listMemories({ q, year, batch, type, sort = 'desc', page = 1, limit = PAGE_SIZE } = {}) {
   await delay(180);
-  const db = read();
+  const db = await read();
   const u = session(db);
   const words = q ? normalize(q).split(' ') : [];
   let rows = db.memories.filter((m) =>
@@ -145,7 +148,7 @@ export async function listMemories({ q, year, batch, type, sort = 'desc', page =
 
 export async function getStats() {
   await delay(100);
-  const db = read();
+  const db = await read();
   const ok = db.memories.filter((m) => m.status === STATUS.APPROVED);
   const years = {};
   ok.forEach((m) => { years[m.year] = (years[m.year] || 0) + 1; });
@@ -157,9 +160,18 @@ export async function getStats() {
   };
 }
 
+export async function getHomeExtras() {
+  const db = await read(); const userId = session(db)?.id; const now = new Date(); const cutoff = Date.now() - 7 * 86400000;
+  const approved = db.memories.filter((m) => m.status === STATUS.APPROVED);
+  const trending = approved.map((m) => ({ ...toClient(m, userId), weekScore: (m.likeEvents || []).filter((e) => Date.parse(e.at) >= cutoff).length + (m.comments || []).filter((c) => Date.parse(c.createdAt) >= cutoff).length })).filter((m) => m.weekScore > 0).sort((a, b) => b.weekScore - a.weekScore).slice(0, 5);
+  const onThisDay = approved.filter((m) => m.eventDate && Number(m.year) < now.getFullYear() && m.eventDate.slice(5, 10) === `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`).map((m) => toClient(m, userId));
+  const featured = approved.filter((m) => m.featured).map((m) => toClient(m, userId));
+  return { trending, onThisDay, featured };
+}
+
 export async function getMemory(id) {
   await delay(100);
-  const db = read();
+  const db = await read();
   const u = session(db);
   const m = db.memories.find((x) => x.id === id);
   if (!m || (m.status !== STATUS.APPROVED && m.contributor.id !== u?.id && u?.role !== ROLES.ADMIN)) throw fail('Memory not found', 404);
@@ -168,17 +180,17 @@ export async function getMemory(id) {
 
 export async function createMemory(p) {
   await delay(450);
-  const db = read();
+  const db = await read();
   const u = requireUser(db);
   const dups = findDuplicates(db, p);
   const m = {
     id: uid('m'), title: p.title.trim(), description: p.description.trim(), year: Number(p.year),
     type: p.type, batch: p.batch, eventDate: p.eventDate || null, tags: p.tags || [], related: p.related || '',
     images: (p.images || []).slice(0, 4), contributor: { id: u.id, name: u.name }, status: STATUS.PENDING,
-    likes: [], createdAt: new Date().toISOString(), duplicateOf: dups[0]?.id || null, duplicateScore: dups[0]?.score || null, rejectReason: null,
+    likes: [], comments: [], reactions: { '❤️': [], '😂': [], '😢': [], '🔥': [] }, createdAt: new Date().toISOString(), duplicateOf: dups[0]?.id || null, duplicateScore: dups[0]?.score || null, rejectReason: null,
   };
   db.memories.unshift(m);
-  write(db);
+  await write(db);
   realtime.emit(EV.NEW, { id: m.id, title: m.title, by: u.name });
   if (dups.length) realtime.emit(EV.DUPLICATE, { id: m.id, title: m.title, of: dups[0] });
   return { memory: toClient(m, u.id), duplicates: dups };
@@ -186,27 +198,105 @@ export async function createMemory(p) {
 
 export async function myMemories() {
   await delay(200);
-  const db = read();
+  const db = await read();
   const u = requireUser(db);
   return db.memories.filter((m) => m.contributor.id === u.id)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((m) => toClient(m, u.id));
 }
 
+export async function editOwnMemory(id, changes) {
+  const db = await read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id && x.contributor.id === u.id);
+  if (!m || ![STATUS.PENDING, STATUS.REJECTED].includes(m.status)) throw fail('Only your pending or rejected memories can be edited', 403);
+  ['title', 'description', 'eventDate', 'type', 'batch', 'tags', 'related', 'images'].forEach((key) => { if (changes[key] !== undefined) m[key] = changes[key]; });
+  if (changes.year !== undefined) { m.year = Number(changes.year); m.batch = changes.batch || `Batch ${m.year}`; }
+  if (m.status === STATUS.REJECTED) { m.status = STATUS.PENDING; m.rejectReason = null; db.users.filter((x) => x.role === ROLES.ADMIN).forEach((admin) => notify(db, admin.id, { type: 'new_pending', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} revised a rejected memory for review` })); realtime.emit(EV.NEW, { id: m.id, title: m.title, by: u.name }); }
+  await write(db); return toClient(m, u.id);
+}
+
+export async function deleteOwnMemory(id) {
+  const db = await read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id && x.contributor.id === u.id);
+  if (!m || m.status !== STATUS.PENDING) throw fail('Only your pending memories can be deleted', 403);
+  db.memories = db.memories.filter((x) => x.id !== id); await write(db); return true;
+}
+
+const REPORT_REASONS = ['wrong info', 'duplicate', 'inappropriate'];
+export async function reportMemory(id, reason) {
+  const db = await read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id);
+  if (!m || m.status !== STATUS.APPROVED) throw fail('Memory not found', 404);
+  if (!REPORT_REASONS.includes(reason)) throw fail('Choose a valid report reason');
+  m.reports ||= []; if (!m.reports.some((r) => r.userId === u.id)) m.reports.push({ id: uid('r'), userId: u.id, userName: u.name, reason, createdAt: new Date().toISOString() });
+  m.reported = true;
+  db.users.filter((x) => x.role === ROLES.ADMIN).forEach((admin) => notify(db, admin.id, { type: 'report', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} reported “${m.title}”: ${reason}` }));
+  await write(db); return true;
+}
+
+export async function listReported() { const db = await read(); requireAdmin(db); return db.memories.filter((m) => m.reported).map((m) => toClient(m)); }
+export async function dismissReport(id) { const db = await read(); requireAdmin(db); const m = db.memories.find((x) => x.id === id); if (!m) throw fail('Memory not found', 404); m.reported = false; m.reports = []; await write(db); return true; }
+export async function deleteReported(id) { const db = await read(); requireAdmin(db); const m = db.memories.find((x) => x.id === id && x.reported); if (!m) throw fail('Reported memory not found', 404); db.memories = db.memories.filter((x) => x.id !== id); await write(db); return true; }
+
+export async function listCollections() { const db = await read(); return (db.collections || []).map((c) => ({ ...c, count: c.memoryIds?.length || 0 })); }
+export async function createCollection(payload) { const db = await read(); requireAdmin(db); const name = String(payload.name || '').trim(); if (!name) throw fail('Collection name is required'); const c = { id: uid('col'), name, description: String(payload.description || '').trim(), memoryIds: [], createdAt: new Date().toISOString() }; (db.collections ||= []).push(c); await write(db); return c; }
+export async function updateCollection(id, payload) { const db = await read(); requireAdmin(db); const c = (db.collections || []).find((x) => x.id === id); if (!c) throw fail('Collection not found', 404); c.name = String(payload.name ?? c.name).trim(); c.description = String(payload.description ?? c.description).trim(); if (!c.name) throw fail('Collection name is required'); await write(db); return c; }
+export async function deleteCollection(id) { const db = await read(); requireAdmin(db); if (!(db.collections || []).some((x) => x.id === id)) throw fail('Collection not found', 404); db.collections = db.collections.filter((x) => x.id !== id); await write(db); return true; }
+export async function addMemoryToCollection(id, memoryId) { const db = await read(); requireAdmin(db); const c = (db.collections || []).find((x) => x.id === id); const m = db.memories.find((x) => x.id === memoryId && x.status === STATUS.APPROVED); if (!c || !m) throw fail('Collection or approved memory not found', 404); if (!c.memoryIds.includes(memoryId)) c.memoryIds.push(memoryId); await write(db); return c; }
+export async function removeMemoryFromCollection(id, memoryId) { const db = await read(); requireAdmin(db); const c = (db.collections || []).find((x) => x.id === id); if (!c) throw fail('Collection not found', 404); c.memoryIds = c.memoryIds.filter((x) => x !== memoryId); await write(db); return c; }
+export async function getCollection(id) { const db = await read(); const c = (db.collections || []).find((x) => x.id === id); if (!c) throw fail('Collection not found', 404); const userId = session(db)?.id; return { ...c, memories: c.memoryIds.map((mid) => db.memories.find((m) => m.id === mid && m.status === STATUS.APPROVED)).filter(Boolean).map((m) => toClient(m, userId)) }; }
+export async function getContributor(id) { const db = await read(); const memories = db.memories.filter((m) => m.contributor.id === id && m.status === STATUS.APPROVED); const user = db.users.find((u) => u.id === id); const name = user?.name || memories[0]?.contributor.name; if (!name) throw fail('Contributor not found', 404); const totalLikes = memories.reduce((sum, m) => sum + (m.likes || []).length, 0); const totals = new Map(); db.memories.filter((m) => m.status === STATUS.APPROVED).forEach((m) => totals.set(m.contributor.id, (totals.get(m.contributor.id) || 0) + (m.likes || []).length)); const topLikes = Math.max(0, ...totals.values()); return { id, name, batch: user?.batch || memories[0]?.batch || '', memories: memories.map((m) => toClient(m, session(db)?.id)), totalLikes, badges: [...(memories.length ? ['First Memory'] : []), ...(memories.length >= 5 ? ['5 Memories'] : []), ...(totalLikes > 0 && totalLikes === topLikes ? ['Most Liked'] : [])] }; }
+export async function getCollectionsForMemory(memoryId) { const db = await read(); return (db.collections || []).filter((c) => c.memoryIds.includes(memoryId)).map(({ id, name }) => ({ id, name })); }
+
 export async function toggleLike(id) {
   await delay(80);
-  const db = read();
+  const db = await read();
   const u = requireUser(db);
   const m = db.memories.find((x) => x.id === id);
   if (!m) throw fail('Memory not found', 404);
   m.likes = m.likes.includes(u.id) ? m.likes.filter((x) => x !== u.id) : [...m.likes, u.id];
-  write(db);
+  if (m.likes.includes(u.id)) { (m.likeEvents ||= []).push({ userId: u.id, at: new Date().toISOString() }); notify(db, m.contributor.id, { type: 'like', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} liked your memory` }); }
+  await write(db);
   return { liked: m.likes.includes(u.id), likesCount: m.likes.length };
 }
+
+export async function toggleReaction(id, emoji) {
+  const valid = ['❤️', '😂', '😢', '🔥']; if (!valid.includes(emoji)) throw fail('Unsupported reaction');
+  const db = await read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id);
+  if (!m) throw fail('Memory not found', 404);
+  m.reactions ||= { '❤️': [], '😂': [], '😢': [], '🔥': [] };
+  const existing = Object.keys(m.reactions).find((key) => m.reactions[key].includes(u.id));
+  if (existing === emoji) m.reactions[emoji] = m.reactions[emoji].filter((x) => x !== u.id);
+  else {
+    Object.keys(m.reactions).forEach((key) => { m.reactions[key] = m.reactions[key].filter((x) => x !== u.id); });
+    m.reactions[emoji].push(u.id);
+    notify(db, m.contributor.id, { type: 'reaction', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} reacted ${emoji} to your memory` });
+  }
+  await write(db); return toClient(m, u.id);
+}
+export async function setFeatured(id, featured) { const db = await read(); requireAdmin(db); const m = db.memories.find((x) => x.id === id); if (!m) throw fail('Memory not found', 404); m.featured = !!featured; await write(db); realtime.emit(EV.UPDATED, { memory: toClient(m), changed: ['featured'] }); return toClient(m); }
+
+export async function addComment(id, text) {
+  const db = await read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id);
+  if (!m) throw fail('Memory not found', 404);
+  const value = String(text || '').trim(); if (!value || value.length > 300) throw fail('Comment must be 1–300 characters');
+  const comment = { id: uid('c'), userId: u.id, userName: u.name, text: value, createdAt: new Date().toISOString() };
+  (m.comments ||= []).push(comment);
+  notify(db, m.contributor.id, { type: 'comment', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} commented on your memory` });
+  await write(db); return { comments: m.comments, comment };
+}
+
+export async function deleteComment(memoryId, commentId) {
+  const db = await read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === memoryId); const comment = m?.comments?.find((x) => x.id === commentId);
+  if (!comment) throw fail('Comment not found', 404); if (comment.userId !== u.id && u.role !== ROLES.ADMIN) throw fail('You cannot delete this comment', 403);
+  m.comments = m.comments.filter((x) => x.id !== commentId); await write(db); return m.comments;
+}
+
+export async function listNotifications() { const db = await read(); const u = requireUser(db); return (db.notifications || []).filter((n) => n.userId === u.id).slice(0, 100); }
+export async function unreadCount() { return (await listNotifications()).filter((n) => !n.read).length; }
+export async function markNotificationRead(id) { const db = await read(); const u = requireUser(db); const n = (db.notifications || []).find((x) => x.id === id && x.userId === u.id); if (n) n.read = true; await write(db); return n; }
+export async function markAllRead() { const db = await read(); const u = requireUser(db); (db.notifications || []).filter((n) => n.userId === u.id).forEach((n) => { n.read = true; }); await write(db); return true; }
 
 /* ---------------- admin ---------------- */
 export async function adminList({ status = STATUS.PENDING, page = 1, limit = 20 } = {}) {
   await delay(200);
-  const db = read();
+  const db = await read();
   requireAdmin(db);
   const counts = { pending: 0, approved: 0, rejected: 0 };
   db.memories.forEach((m) => { counts[m.status]++; });
@@ -220,13 +310,13 @@ export async function adminList({ status = STATUS.PENDING, page = 1, limit = 20 
 
 export async function reviewMemory(id, { status, reason }) {
   await delay(250);
-  const db = read();
+  const db = await read();
   requireAdmin(db);
   const m = db.memories.find((x) => x.id === id);
   if (!m) throw fail('Memory not found', 404);
   m.status = status;
   m.rejectReason = status === STATUS.REJECTED ? reason || 'Not suitable for the timeline' : null;
-  write(db);
+  await write(db);
   if (status === STATUS.APPROVED) realtime.emit(EV.PUBLISHED, toClient(m));
   realtime.emit(EV.REVIEWED, { id: m.id, title: m.title, status, reason: m.rejectReason, userId: m.contributor.id });
   return toClient(m);
@@ -234,16 +324,16 @@ export async function reviewMemory(id, { status, reason }) {
 
 export async function updateMemory(id, changes) {
   await delay(250);
-  const db = read();
+  const db = await read();
   requireAdmin(db);
   const m = db.memories.find((x) => x.id === id);
   if (!m) throw fail('Memory not found', 404);
   const changed = [];
-  ['year', 'eventDate', 'title', 'description'].forEach((k) => {
+  ['year', 'eventDate', 'title', 'description', 'featured'].forEach((k) => {
     if (changes[k] !== undefined && changes[k] !== m[k]) { m[k] = k === 'year' ? Number(changes[k]) : changes[k]; changed.push(k === 'eventDate' ? 'date' : k); }
   });
   if (changed.includes('year')) m.batch = `Batch ${m.year}`;
-  write(db);
+  await write(db);
   if (m.status === STATUS.APPROVED && changed.length) realtime.emit(EV.UPDATED, { memory: toClient(m), changed });
   return toClient(m);
 }

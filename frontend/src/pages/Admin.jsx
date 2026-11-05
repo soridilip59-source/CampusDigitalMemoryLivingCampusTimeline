@@ -13,7 +13,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import { EmptyState, ErrorState, PageLoader } from '../components/common/Loader';
 import MemoryDetail from '../components/memory/MemoryDetail';
 
-const TABS = [STATUS.PENDING, STATUS.APPROVED, STATUS.REJECTED];
+const TABS = [STATUS.PENDING, STATUS.APPROVED, STATUS.REJECTED, 'reported'];
 
 export default function Admin() {
   const toast = useToast();
@@ -31,7 +31,7 @@ export default function Admin() {
   const load = useCallback(async (p = 1, append = false) => {
     if (!append) setLoading(true);
     try {
-      const r = await memoryApi.adminList({ status: tab, page: p });
+      const r = tab === 'reported' ? { items: await memoryApi.listReported(), hasMore: false, total: 0, counts: data.counts } : await memoryApi.adminList({ status: tab, page: p });
       setData((d) => ({ ...r, items: append ? [...d.items, ...r.items] : r.items }));
       setPage(p); setError('');
     } catch (e) { setError(e.message); }
@@ -62,7 +62,7 @@ export default function Admin() {
       <p className="mt-1 text-slate-500">Approve memories to publish them. Changing a date or year of a published memory updates everyone’s timeline live.</p>
 
       <div className="no-scrollbar mt-8 flex gap-2 overflow-x-auto">
-        {TABS.map((s) => (
+      {TABS.map((s) => (
           <button key={s} onClick={() => setTab(s)} className={`chip capitalize ${tab === s ? 'chip-on' : ''}`}>{s} <span className="text-xs opacity-60">{data.counts?.[s] ?? 0}</span></button>
         ))}
       </div>
@@ -87,12 +87,14 @@ export default function Admin() {
                   </p>
                 )}
                 {m.rejectReason && <p className="mt-2 text-sm text-rose-600">Reason: {m.rejectReason}</p>}
+                {tab === 'reported' && <div className="mt-3 rounded-xl bg-rose-50 p-3 text-sm dark:bg-rose-500/10"><b>Reported</b>{m.reports?.map((r) => <p key={r.id}>{r.reason} · {r.userName} · {timeAgo(r.createdAt)}</p>)}</div>}
               </div>
             </div>
             <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-900/5 pt-4 dark:border-white/10">
-              <Button variant="ghost" size="sm" onClick={() => setEdit({ ...m })}>Edit date or year</Button>
+              {tab === 'reported' ? <><Button variant="secondary" size="sm" loading={busyId === m.id} onClick={() => act(m.id, () => memoryApi.dismissReport(m.id), 'Report dismissed')}>Dismiss report</Button><Button variant="danger" size="sm" loading={busyId === m.id} onClick={() => { if (window.confirm(`Delete “${m.title}”?`)) act(m.id, () => memoryApi.deleteReported(m.id), 'Reported memory deleted'); }}>Delete memory</Button></> : <><Button variant="ghost" size="sm" onClick={() => setEdit({ ...m })}>Edit date or year</Button>
+              {m.status === STATUS.APPROVED && <Button variant="ghost" size="sm" onClick={() => act(m.id, () => memoryApi.setFeatured(m.id, !m.featured), m.featured ? 'Unpinned from home' : 'Pinned to home')}>{m.featured ? 'Unpin feature' : 'Pin feature'}</Button>}
               {m.status !== STATUS.REJECTED && <Button variant="secondary" size="sm" disabled={busyId === m.id} onClick={() => { setReject(m); setReason(''); }}>Reject</Button>}
-              {m.status !== STATUS.APPROVED && <Button variant="success" size="sm" loading={busyId === m.id} onClick={() => approve(m)}><Icon name="check" className="h-4 w-4" /> Approve and publish</Button>}
+              {m.status !== STATUS.APPROVED && <Button variant="success" size="sm" loading={busyId === m.id} onClick={() => approve(m)}><Icon name="check" className="h-4 w-4" /> Approve and publish</Button>}</>}
             </div>
           </article>
         ))}

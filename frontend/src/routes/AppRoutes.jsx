@@ -11,6 +11,9 @@ const Login = lazy(() => import('../pages/auth/Login'));
 const Register = lazy(() => import('../pages/auth/Register'));
 const SubmitMemory = lazy(() => import('../pages/SubmitMemory'));
 const MySubmissions = lazy(() => import('../pages/MySubmissions'));
+const Saved = lazy(() => import('../pages/Saved'));
+const Collections = lazy(() => import('../pages/Collections'));
+const Contributor = lazy(() => import('../pages/Contributor'));
 const Admin = lazy(() => import('../pages/Admin'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 
@@ -20,9 +23,13 @@ export default function AppRoutes() {
       <Routes>
         <Route element={<MainLayout />}>
           <Route index element={<Home />} />
+          <Route path="collections" element={<Collections />} />
+          <Route path="collections/:id" element={<Collections />} />
+          <Route path="u/:id" element={<Contributor />} />
           <Route element={<ProtectedRoute />}>
             <Route path="submit" element={<SubmitMemory />} />
             <Route path="my-submissions" element={<MySubmissions />} />
+            <Route path="saved" element={<Saved />} />
           </Route>
           <Route element={<ProtectedRoute admin />}>
             <Route path="admin" element={<Admin />} />

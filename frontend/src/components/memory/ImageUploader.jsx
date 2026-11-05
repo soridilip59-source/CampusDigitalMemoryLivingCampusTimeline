@@ -16,7 +16,7 @@ export default function ImageUploader({ value = [], onChange, error }) {
     try {
       const out = [];
       for (const f of files) {
-        if (!f.type.startsWith('image/')) { setMsg('Only photos (JPG, PNG, WebP) are allowed.'); continue; }
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { setMsg('Only photos (JPG, PNG, WebP) are allowed.'); continue; }
         if (f.size > 15 * 1024 * 1024) { setMsg('Each photo must be under 15 MB.'); continue; }
         out.push(await compressImage(f));
       }
@@ -52,7 +52,7 @@ export default function ImageUploader({ value = [], onChange, error }) {
           <span className="font-semibold">{busy ? 'Optimising photos…' : 'Drop photos here or tap to choose'}</span>
           <span className="text-xs">Photos are resized in your browser so uploads stay fast.</span>
         </button>
-        <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
+        <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
       </div>
       {(msg || error) && <p className="mt-1 text-xs font-medium text-rose-500">{msg || error}</p>}
     </div>

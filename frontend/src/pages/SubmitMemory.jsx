@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuth from '../hooks/useAuth';
 import * as memoryApi from '../api/memoryApi';
@@ -12,11 +12,14 @@ export default function SubmitMemory() {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState(null);
+  const [initial] = useState(() => { const raw = localStorage.getItem(`cdm_draft_${user.id}`); if (!raw || !window.confirm('Restore your saved memory draft?')) return undefined; try { return JSON.parse(raw); } catch { localStorage.removeItem(`cdm_draft_${user.id}`); return undefined; } });
+  const saveDraft = useCallback((value) => { setDraft(value); localStorage.setItem(`cdm_draft_${user.id}`, JSON.stringify(value)); }, [user.id]);
 
   const onSubmit = async (payload) => {
     setBusy(true);
     try {
       const { duplicates } = await memoryApi.create(payload);
+      localStorage.removeItem(`cdm_draft_${user.id}`);
       toast.success('Sent for review. You will be notified when it is published.');
       if (duplicates?.length) toast.warn('It looks similar to an existing memory, so admins will compare them.');
       navigate('/my-submissions');
@@ -34,7 +37,7 @@ export default function SubmitMemory() {
       <div>
         <h1 className="text-3xl font-extrabold sm:text-4xl">Add a campus memory</h1>
         <p className="mb-8 mt-2 text-slate-500">Admins review every memory before it reaches the timeline.</p>
-        <MemoryForm onSubmit={onSubmit} onChange={setDraft} submitting={busy} defaultBatch={user.batch} />
+        <MemoryForm initial={initial} onSubmit={onSubmit} onChange={saveDraft} submitting={busy} defaultBatch={user.batch} />
       </div>
       <aside className="hidden lg:block">
         <div className="sticky top-24">

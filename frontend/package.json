@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check": "node --check src/api/mockServer.js && node --check src/api/idb.js && node --check src/api/memoryApi.js",
     "preview": "vite preview"
   },
   "dependencies": {

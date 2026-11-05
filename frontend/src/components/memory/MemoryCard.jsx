@@ -1,10 +1,18 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import Icon from '../common/Icon';
 import Avatar from '../common/Avatar';
 import { typeMeta } from '../../utils/constants';
 import { formatDate } from '../../utils/formatDate';
+import useAuth from '../../hooks/useAuth';
+import { getSaved, toggleSaved } from '../../utils/saved';
+import * as memoryApi from '../../api/memoryApi';
+import { useToast } from '../../context/ToastContext';
+import { Link } from 'react-router-dom';
 
-function MemoryCard({ memory: m, onOpen, onLike, preview = false }) {
+function MemoryCard({ memory: m, onOpen, onLike, onReact, preview = false }) {
+  const { user } = useAuth(); const toast = useToast();
+  const [saved, setSaved] = useState(() => !!user && getSaved(user.id).includes(m.id));
+  const react = async (emoji) => { if (!user) return toast.info('Log in to react'); if (onReact) return onReact(m.id, emoji); try { await memoryApi.toggleReaction(m.id, emoji); toast.success('Reaction saved'); } catch (e) { toast.error(e.message); } };
   const t = typeMeta(m.type);
   const cover = m.images?.[0];
   return (
@@ -32,7 +40,7 @@ function MemoryCard({ memory: m, onOpen, onLike, preview = false }) {
       <div className="mt-3 flex items-center justify-between gap-2 px-1.5 pb-1">
         <div className="flex min-w-0 items-center gap-2">
           <Avatar name={m.contributor?.name} />
-          <span className="truncate text-sm font-medium text-slate-600 dark:text-slate-300">{m.contributor?.name}</span>
+          <Link to={`/u/${m.contributor?.id}`} className="truncate text-sm font-medium text-slate-600 hover:text-brand-600 dark:text-slate-300">{m.contributor?.name}</Link>
         </div>
         <button
           type="button" disabled={preview}
@@ -43,6 +51,11 @@ function MemoryCard({ memory: m, onOpen, onLike, preview = false }) {
           <Icon name="heart" className="h-4 w-4" fill={m.liked} /> {m.likesCount}
         </button>
       </div>
+      {!preview && <div className="flex items-center gap-1 px-1.5">
+        {['❤️', '😂', '😢', '🔥'].map((emoji) => <button key={emoji} onClick={() => react(emoji)} aria-label={`React ${emoji}`} className="rounded-full px-1.5 py-1 text-xs hover:bg-brand-50 dark:hover:bg-white/10">{emoji} {m.reactionCounts?.[emoji] || 0}</button>)}
+        {m.comments?.length > 0 && <span className="ml-auto text-xs text-slate-500">{m.comments.length} comments</span>}
+        {user && <button type="button" onClick={() => setSaved(toggleSaved(user.id, m.id).includes(m.id))} aria-label={saved ? 'Remove saved memory' : 'Save memory'} aria-pressed={saved} className="ml-auto rounded-full px-2 py-1 text-sm">{saved ? '🔖' : '♧'}</button>}
+      </div>}
     </article>
   );
 }

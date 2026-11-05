@@ -13,6 +13,7 @@ import Loader, { CardSkeleton, EmptyState, ErrorState } from '../components/comm
 import MemoryFilters from '../components/memory/MemoryFilters';
 import MemoryTimeline from '../components/memory/MemoryTimeline';
 import MemoryDetail from '../components/memory/MemoryDetail';
+import MemoryCard from '../components/memory/MemoryCard';
 
 const EMPTY = { q: '', year: '', batch: '', type: '', sort: 'desc' };
 
@@ -28,12 +29,14 @@ export default function Home() {
   const [stats, setStats] = useState(null);
   const [openId, setOpenId] = useState(params.get('m'));
   const [deepLinked, setDeepLinked] = useState(null);
+  const [extras, setExtras] = useState({ trending: [], onThisDay: [], featured: [] });
 
   useEffect(() => {
     const load = () => memoryApi.getStats().then(setStats).catch(() => {});
     load();
     return realtime.on(EV.PUBLISHED, load);
   }, []);
+  useEffect(() => { const load = () => memoryApi.getHomeExtras().then(setExtras).catch(() => {}); load(); const offs = [realtime.on(EV.PUBLISHED, load), realtime.on(EV.UPDATED, load)]; return () => offs.forEach((off) => off()); }, []);
 
   // open a shared link (?m=ID)
   useEffect(() => {
@@ -48,9 +51,12 @@ export default function Home() {
     if (!user) return toast.info('Log in to like memories');
     toggleLike(id);
   }, [user, toggleLike, toast]);
+  const react = useCallback(async (id, emoji) => { if (!user) return toast.info('Log in to react'); await memoryApi.toggleReaction(id, emoji); retry(); }, [user, toast, retry]);
 
   const sentinel = useInfiniteScroll(loadMore, hasMore && !loading && !loadingMore);
   const years = CURRENT_YEAR - START_YEAR + 1;
+  const hasFilters = !!(filters.q.trim() || filters.year || filters.batch || filters.type || filters.sort !== 'desc');
+  const surprise = async () => { try { const r = await memoryApi.list({ page: 1, limit: 500 }); if (r.items.length) open(r.items[Math.floor(Math.random() * r.items.length)]); } catch (e) { toast.error(e.message); } };
 
   return (
     <>
@@ -79,6 +85,13 @@ export default function Home() {
         </div>
       </section>
 
+      {!hasFilters && <section className="mx-auto max-w-6xl space-y-8 px-4 pt-8">
+        {extras.featured.length > 0 && <div><div className="mb-3 flex items-baseline justify-between"><h2 className="text-2xl font-extrabold">Featured memories</h2><span className="text-sm text-slate-500">Pinned by campus admins</span></div><div className="no-scrollbar flex gap-4 overflow-x-auto pb-3">{extras.featured.map((m) => <div key={m.id} className="w-72 shrink-0"><MemoryCard memory={m} onOpen={open} onLike={like} onReact={react}/></div>)}</div></div>}
+        {extras.trending.length > 0 && <div><h2 className="mb-3 text-2xl font-extrabold">Trending this week</h2><div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{extras.trending.map((m) => <MemoryCard key={m.id} memory={m} onOpen={open} onLike={like} onReact={react}/>)}</div></div>}
+        {extras.onThisDay.length > 0 && <div className="rounded-2xl bg-brand-50 p-5 dark:bg-brand-500/10"><h2 className="text-2xl font-extrabold">On this day</h2><div className="mt-3 flex flex-wrap gap-2">{extras.onThisDay.map((m) => <button key={m.id} onClick={() => open(m)} className="chip">{m.year} · {m.title}</button>)}</div></div>}
+        <Button variant="secondary" onClick={surprise}>Surprise me</Button>
+      </section>}
+
       <section id="timeline" className="mx-auto max-w-6xl px-4 py-10">
         <MemoryFilters filters={filters} onChange={setFilters} stats={stats} />
 
@@ -93,7 +106,7 @@ export default function Home() {
           ) : (
             <>
               <p className="mb-6 text-sm font-medium text-slate-500">Showing {items.length} of {total} {total === 1 ? 'memory' : 'memories'}</p>
-              <MemoryTimeline items={items} onOpen={open} onLike={like} />
+              <MemoryTimeline items={items} onOpen={open} onLike={like} onReact={react} />
               <div ref={sentinel} className="flex h-24 items-center justify-center">
                 {loadingMore ? <Loader /> : hasMore ? <Button variant="secondary" onClick={loadMore}>Load more</Button> : <p className="text-sm text-slate-500">You have reached the start of the story. 🎓</p>}
               </div>
@@ -102,7 +115,7 @@ export default function Home() {
         </div>
       </section>
 
-      <MemoryDetail memory={current} onClose={close} onLike={like} />
+      <MemoryDetail memory={current} onClose={close} onLike={like} onReact={react} />
     </>
   );
 }

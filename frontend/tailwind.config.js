@@ -13,8 +13,8 @@ export default {
         night: '#0c0b1a',
         paper: '#f5f3fb',
         brand: {
-          50: '#f3f0ff', 100: '#e9e3ff', 200: '#d4c9ff', 300: '#b6a4ff', 400: '#9a80ff',
-          500: '#7c5cff', 600: '#6a45f5', 700: '#5a35dc', 800: '#4a2db3', 900: '#3b2590',
+          50: 'hsl(var(--brand-50) / <alpha-value>)', 100: 'hsl(var(--brand-100) / <alpha-value>)', 200: 'hsl(var(--brand-200) / <alpha-value>)', 300: 'hsl(var(--brand-300) / <alpha-value>)', 400: 'hsl(var(--brand-400) / <alpha-value>)',
+          500: 'hsl(var(--brand-500) / <alpha-value>)', 600: 'hsl(var(--brand-600) / <alpha-value>)', 700: 'hsl(var(--brand-700) / <alpha-value>)', 800: 'hsl(var(--brand-800) / <alpha-value>)', 900: 'hsl(var(--brand-900) / <alpha-value>)',
         },
         coral: { 400: '#ff8a6e', 500: '#ff6b4a', 600: '#f0522f' },
       },
