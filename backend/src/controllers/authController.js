@@ -17,7 +17,7 @@ const generateToken = (userId) => {
 // Register user
 const register = async (req, res) => {
   try {
-    const { name, email, password, batch } = req.body;
+    const { name, email, password, batch } = req.body || {};
 
     // Validate required fields
     if (!name || !email || !password) {
@@ -74,20 +74,27 @@ const register = async (req, res) => {
       }
     });
 
-  } catch (error) {
-    console.error("Registration error:", error);
+} catch (error) {
+  console.error("Registration error:", error);
 
-    return res.status(500).json({
+  if (error.code === 11000) {
+    return res.status(409).json({
       success: false,
-      message: "Registration failed"
+      message: "User already exists with this email"
     });
   }
+
+  return res.status(500).json({
+    success: false,
+    message: "Registration failed"
+  });
+}
 };
 
 // Login user
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
 
     if (!email || !password) {
       return res.status(400).json({

@@ -1,8 +1,5 @@
-
-require("dotenv").config({
-  path: "./.env"
-});
-
+require("dotenv").config({ path: "./.env",});
+const connectDB = require("./config/db");
 const http = require("http");
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
@@ -13,11 +10,16 @@ const PORT = process.env.PORT || 5000;
 
 const server = http.createServer(app);
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST", "PATCH"]
-  }
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PATCH"],
+  },
 });
 
 // Make Socket.IO available to Express controllers
@@ -34,13 +36,9 @@ io.use(async (socket, next) => {
 
     const cleanToken = token.replace(/^Bearer\s+/i, "");
 
-    const decoded = jwt.verify(
-      cleanToken,
-      process.env.JWT_SECRET
-    );
+    const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id)
-      .select("_id role");
+    const user = await User.findById(decoded.id).select("_id role");
 
     if (!user) {
       return next(new Error("User not found"));
@@ -50,7 +48,6 @@ io.use(async (socket, next) => {
     socket.data.role = user.role;
 
     next();
-
   } catch (error) {
     next(new Error("Invalid or expired token"));
   }
@@ -74,7 +71,21 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log("Socket.IO is ready!");
-});
+const startServer = async () => {
+  try {
+    // Connect to MongoDB first
+    await connectDB();
+
+    // Start server only after successful connection
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log("Socket.IO is ready!");
+    });
+
+  } catch (error) {
+    console.error("Server startup failed:", error.message);
+    process.exit(1);
+  }
+};
+
+startServer();

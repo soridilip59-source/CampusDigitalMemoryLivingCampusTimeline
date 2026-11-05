@@ -101,28 +101,32 @@ const approveMemory = async (req, res) => {
 
     await memory.save();
 
-    // Save approval notification
-    const notification = await Notification.create({
-      recipient: memory.submittedBy,
-      type: "memory:approved",
-      title: "Memory Approved!",
-      message: `Your memory "${memory.title}" has been approved.`,
-      memory: memory._id,
+ // Save notification and emit event
+try {
+  const notification = await Notification.create({
+    recipient: memory.submittedBy,
+    type: "memory:approved",
+    title: "Memory Approved!",
+    message: `Your memory "${memory.title}" has been approved.`,
+    memory: memory._id,
+  });
+
+  const io = req.app.get("io");
+
+  if (io) {
+    io.to(`user:${memory.submittedBy.toString()}`).emit("memory:approved", {
+      notificationId: notification._id,
+      memoryId: memory._id,
+      title: memory.title,
+      status: memory.status,
+      message: "Your memory has been approved!",
     });
+  }
+} catch (notificationError) {
+  console.error("Approval notification error:", notificationError);
+}
 
-    // Get Socket.IO instance
-    const io = req.app.get("io");
 
-    // Notify the memory submitter
-    if (io) {
-      io.to(`user:${memory.submittedBy.toString()}`).emit("memory:approved", {
-        notificationId: notification._id,
-        memoryId: memory._id,
-        title: memory.title,
-        status: memory.status,
-        message: "Your memory has been approved!",
-      });
-    }
 
     return res.status(200).json({
       success: true,
@@ -171,45 +175,49 @@ const rejectMemory = async (req, res) => {
     memory.rejectionReason = rejectionReason.trim();
 
     await memory.save();
+// Save notification and emit event
+try {
+  const notification = await Notification.create({
+    recipient: memory.submittedBy,
+    type: "memory:rejected",
+    title: "Memory Rejected",
+    message: `Your memory "${memory.title}" was rejected. Reason: ${memory.rejectionReason}`,
+    memory: memory._id,
+  });
 
-    // Save rejection notification
-    const notification = await Notification.create({
-      recipient: memory.submittedBy,
-      type: "memory:rejected",
-      title: "Memory Rejected",
-      message: `Your memory "${memory.title}" was rejected. Reason: ${memory.rejectionReason}`,
-      memory: memory._id,
-    });
+  const io = req.app.get("io");
 
-    // Get Socket.IO instance
-    const io = req.app.get("io");
-
-    // Notify the original submitter
-    if (io) {
-      io.to(`user:${memory.submittedBy.toString()}`).emit("memory:rejected", {
-        notificationId: notification._id,
-        memoryId: memory._id,
-        title: memory.title,
-        status: memory.status,
-        rejectionReason: memory.rejectionReason,
-        message: "Your memory has been rejected.",
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Memory rejected successfully",
-      memory,
-    });
-  } catch (error) {
-    console.error("Reject memory error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to reject memory",
+  if (io) {
+    io.to(`user:${memory.submittedBy.toString()}`).emit("memory:rejected", {
+      notificationId: notification._id,
+      memoryId: memory._id,
+      title: memory.title,
+      status: memory.status,
+      rejectionReason: memory.rejectionReason,
+      message: "Your memory has been rejected.",
     });
   }
+} catch (notificationError) {
+  console.error("Rejection notification error:", notificationError);
+}
+
+  return res.status(200).json({
+  success: true,
+  message: "Memory rejected successfully",
+  memory,
+});
+
+} catch (error) {
+  console.error("Reject memory error:", error);
+
+  return res.status(500).json({
+    success: false,
+    message: "Failed to reject memory",
+  });
+}
 };
+
+
 
 module.exports = {
   getPendingMemories,

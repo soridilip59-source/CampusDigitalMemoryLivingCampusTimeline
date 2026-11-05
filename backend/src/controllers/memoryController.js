@@ -1,12 +1,9 @@
 const User = require("../models/User");
 const Notification = require("../models/Notification");
 const Memory = require("../models/Memory");
+const uploadToCloudinary = require("../utils/cloudinaryUpload");
 
- const uploadToCloudinary = require("../utils/cloudinaryUpload");
-
-
-
- // Upload multiple files to Cloudinary
+// Upload multiple files to Cloudinary
 const uploadMemoryMedia = async (files) => {
   const uploadedMedia = [];
 
@@ -19,23 +16,14 @@ const uploadMemoryMedia = async (files) => {
     uploadedMedia.push({
       url: result.url,
       type: result.resourceType === "video" ? "video" : "image",
-      altText: file.originalname
+      altText: file.originalname,
     });
   }
 
   return uploadedMedia;
 };
 
-
-
-
-
-
-
-
-
-//submit a new campus memory
-
+// Submit a new campus memory
 const createMemory = async (req, res) => {
   try {
     const {
@@ -44,24 +32,31 @@ const createMemory = async (req, res) => {
       year,
       eventDate,
       category,
-      tags
+      tags,
     } = req.body || {};
 
     // Validate required fields
     if (!title || !story || !year || !category) {
       return res.status(400).json({
         success: false,
-        message: "Title, story, year and category are required"
+        message: "Title, story, year and category are required",
       });
     }
 
-
     // Upload media files to Cloudinary
-const media = req.files?.length
-  ? await uploadMemoryMedia(req.files)
-  : [];
+    const media = req.files?.length
+      ? await uploadMemoryMedia(req.files)
+      : [];
 
-
+    // Format tags
+    const formattedTags = Array.isArray(tags)
+      ? tags
+      : typeof tags === "string" && tags.trim()
+        ? tags
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+        : [];
 
     // Save memory in MongoDB
     const memory = await Memory.create({
@@ -70,35 +65,32 @@ const media = req.files?.length
       year: Number(year),
       eventDate: eventDate || undefined,
       category,
-      tags: tags || [],
+      tags: formattedTags,
       media,
       submittedBy: req.user._id,
-      status: "pending"
+      status: "pending",
     });
 
+    // Create notifications for admins
+    try {
+      const admins = await User.find({
+        role: "admin",
+      }).select("_id");
 
-    
-// Find all admin users
-const admins = await User.find({
-  role: "admin"
-}).select("_id");
+      if (admins.length > 0) {
+        const notifications = admins.map((admin) => ({
+          recipient: admin._id,
+          type: "memory:submitted",
+          title: "New Memory Submitted",
+          message: `A new memory "${memory.title}" is waiting for review.`,
+          memory: memory._id,
+        }));
 
-// Create notifications for admins
-if (admins.length > 0) {
-  const notifications = admins.map((admin) => ({
-    recipient: admin._id,
-    type: "memory:submitted",
-    title: "New Memory Submitted",
-    message: `A new memory "${memory.title}" is waiting for review.`,
-    memory: memory._id
-  }));
-
-  // Save notifications in MongoDB
-  await Notification.insertMany(notifications);
-}
-
-
-
+        await Notification.insertMany(notifications);
+      }
+    } catch (notificationError) {
+      console.error("Admin notification error:", notificationError);
+    }
 
     // Get Socket.IO instance
     const io = req.app.get("io");
@@ -110,26 +102,24 @@ if (admins.length > 0) {
         title: memory.title,
         year: memory.year,
         category: memory.category,
-        submittedBy: req.user._id
+        submittedBy: req.user._id,
       });
     }
 
     return res.status(201).json({
       success: true,
       message: "Memory submitted successfully",
-      memory
+      memory,
     });
-
   } catch (error) {
     console.error("Error submitting memory:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to submit memory"
+      message: "Failed to submit memory",
     });
   }
 };
-
 
 // Get all approved memories for public timeline
 const getApprovedMemories = async (req, res) => {
@@ -139,19 +129,23 @@ const getApprovedMemories = async (req, res) => {
       year,
       category,
       page = 1,
-      limit = 10
+      limit = 10,
     } = req.query;
 
-    // Only approved memories
+    // Only approved memories are publicly visible
     const filter = {
-      status: "approved"
+      status: "approved",
     };
 
     // Search by title or story
-    if (search) {
+    if (search && search.trim()) {
+      const safeSearch = search
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
       filter.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { story: { $regex: search, $options: "i" } }
+        { title: { $regex: safeSearch, $options: "i" } },
+        { story: { $regex: safeSearch, $options: "i" } },
       ];
     }
 
@@ -170,85 +164,89 @@ const getApprovedMemories = async (req, res) => {
     const perPage = Math.min(50, Math.max(1, Number(limit) || 10));
     const skip = (currentPage - 1) * perPage;
 
-    const memories = await Memory.find(filter)
-      .populate("submittedBy", "name batch")
-      .sort({ year: -1 })
-      .skip(skip)
-      .limit(perPage);
+    const [memories, totalMemories] = await Promise.all([
+      Memory.find(filter)
+        .populate("submittedBy", "name batch")
+        .sort({ year: -1 })
+        .skip(skip)
+        .limit(perPage),
 
-    const totalMemories = await Memory.countDocuments(filter);
+      Memory.countDocuments(filter),
+    ]);
 
     return res.status(200).json({
       success: true,
       totalMemories,
       currentPage,
       totalPages: Math.ceil(totalMemories / perPage),
-      memories
+      memories,
     });
-
   } catch (error) {
     console.error("Get approved memories error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch memories"
+      message: "Failed to fetch memories",
     });
   }
 };
 
 // Get memories submitted by the logged-in user
-
 const getMyMemories = async (req, res) => {
-    try {
-        const memories = await Memory.find({
-            submittedBy: req.user._id
-        }).sort({ createdAt: -1 });
+  try {
+    const memories = await Memory.find({
+      submittedBy: req.user._id,
+    }).sort({ createdAt: -1 });
 
-        return res.status(200).json({
-            success: true,
-            count: memories.length,
-            memories
-        });
+    return res.status(200).json({
+      success: true,
+      count: memories.length,
+      memories,
+    });
+  } catch (error) {
+    console.error("Error fetching my memories:", error);
 
-    } catch (error) {
-        console.error("Error fetching my memories:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch your memories"
-        });
-    }
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch your memories",
+    });
+  }
 };
 
+// Get a single approved memory by ID
 const getMemoryById = async (req, res) => {
   try {
     const { id } = req.params;
 
     const memory = await Memory.findOne({
       _id: id,
-      status: "approved"
+      status: "approved",
     }).populate("submittedBy", "name batch");
 
     if (!memory) {
       return res.status(404).json({
         success: false,
-        message: "Memory not found"
+        message: "Memory not found",
       });
     }
 
     return res.status(200).json({
       success: true,
-      memory
+      memory,
     });
-
   } catch (error) {
     console.error("Get memory error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch memory"
+      message: "Failed to fetch memory",
     });
   }
 };
 
-module.exports = { createMemory, getApprovedMemories, getMyMemories , getMemoryById};
+module.exports = {
+  createMemory,
+  getApprovedMemories,
+  getMyMemories,
+  getMemoryById,
+};

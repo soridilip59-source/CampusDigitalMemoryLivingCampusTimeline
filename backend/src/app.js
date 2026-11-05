@@ -1,19 +1,31 @@
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const morgan = require("morgan");
-const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const memoryRoutes = require("./routes/memoryRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 
-connectDB();
-const app = express();
+ const app = express();
 
 
 
 // Middleware
-app.use(cors());
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
+app.use(helmet());
+
 app.use(express.json());
 app.use(morgan("dev"));
 
@@ -36,11 +48,19 @@ app.get("/", (req, res) => {
 app.use((err, req, res, next) => {
   console.error("API Error:", err.message);
 
+// Handle invalid MongoDB ObjectId
+if (err.name === "CastError") {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid resource ID"
+  });
+}
+
   if (err instanceof require("multer").MulterError) {
     if (err.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({
         success: false,
-        message: "File size cannot exceed 50 MB"
+        message: "File size cannot exceed 10 MB"
       });
     }
 

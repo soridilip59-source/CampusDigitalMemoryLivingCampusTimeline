@@ -2,16 +2,19 @@ const mongoose = require("mongoose");
 
 const memorySchema = new mongoose.Schema(
   {
-    title: {
-      type: String,
-      required: true,
-      trim: true
-    },
+   title: {
+  type: String,
+  required: true,
+  trim: true,
+  maxlength: 100
+},
 
-    story: {
-      type: String,
-      required: true
-    },
+   story: {
+  type: String,
+  required: true,
+  trim: true,
+  maxlength: 5000
+},
 
     year: {
       type: Number,
@@ -94,8 +97,7 @@ const memorySchema = new mongoose.Schema(
 
 // Improve common database queries
 memorySchema.index({ status: 1, year: -1 });
-memorySchema.index({ submittedBy: 1 });
-
+memorySchema.index({ submittedBy: 1, createdAt: -1 });
 const Memory = mongoose.model("Memory", memorySchema);
 
 module.exports = Memory;
