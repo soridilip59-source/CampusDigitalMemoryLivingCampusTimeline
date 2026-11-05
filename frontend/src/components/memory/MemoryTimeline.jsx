@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react';
 import MemoryCard from './MemoryCard';
 
 /** Groups an already-sorted list by year and draws the rail. Cards alternate sides on desktop. */
-function MemoryTimeline({ items, onOpen, onLike }) {
+function MemoryTimeline({ items, onOpen, onLike, onReact }) {
   const groups = useMemo(() => {
     const out = [];
     items.forEach((m) => {
@@ -28,7 +28,7 @@ function MemoryTimeline({ items, onOpen, onLike }) {
             {g.items.map((m, i) => (
               <li key={m.id} className={`relative md:w-1/2 ${i % 2 === 0 ? 'md:pr-10' : 'md:ml-auto md:pl-10'}`}>
                 <span className={`absolute top-8 h-3.5 w-3.5 rounded-full bg-brand-600 ring-4 ring-paper dark:ring-night -left-[26px] ${i % 2 === 0 ? 'md:left-auto md:-right-[7px]' : 'md:-left-[7px]'}`} />
-                <MemoryCard memory={m} onOpen={onOpen} onLike={onLike} />
+                <MemoryCard memory={m} onOpen={onOpen} onLike={onLike} onReact={onReact} />
               </li>
             ))}
           </ol>

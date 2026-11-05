@@ -25,14 +25,17 @@ const mk = (i, year, type, title, description, who, tags, related, likes) => ({
   contributor: { id: `p_${who}`, name: PEOPLE[who] },
   status: STATUS.APPROVED,
   likes: Array.from({ length: likes }, (_, k) => `seed_${k}`),
+  comments: [], reactions: { '❤️': [], '😂': [], '😢': [], '🔥': [] }, engagement: [], featured: false, flagged: false,
   createdAt: new Date(Date.UTC(year, i % 9, 15)).toISOString(),
   duplicateOf: null, rejectReason: null,
 });
 
 const seed = () => ({
+  notifications: [], collections: [],
   users: [
     { id: 'u_admin', name: 'Campus Admin', email: 'admin@campus.com', password: 'admin123', role: ROLES.ADMIN, batch: 'Staff' },
     { id: 'u_demo', name: 'Demo Student', email: 'student@campus.com', password: 'student123', role: ROLES.STUDENT, batch: 'Batch 2024' },
+    ...PEOPLE.map((name, i) => ({ id: `p_${i}`, name, email: `contributor${i}@campus.com`, password: 'seed', role: ROLES.STUDENT, batch: `Batch ${2018 + i}` })),
   ],
   memories: [
     mk(1, 2018, 'event', 'Campus Journey Begins', 'The very first batch walked into half-painted classrooms, shared one projector and decided this place would be built by the people studying in it.', 0, ['first-batch', 'founding'], 'Orientation Week', 21),
@@ -71,8 +74,14 @@ const requireAdmin = (db) => {
 };
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, batch: u.batch });
 const toClient = (m, userId) => {
-  const { likes, ...rest } = m;
-  return { ...rest, likesCount: likes.length, liked: userId ? likes.includes(userId) : false };
+  const { likes = [], reactions = { '❤️': [], '😂': [], '😢': [], '🔥': [] }, ...rest } = m;
+  const reactionCounts = Object.fromEntries(Object.entries(reactions).map(([emoji, users]) => [emoji, users.length]));
+  return { ...rest, comments: rest.comments || [], reactions, reactionCounts, myReaction: userId ? Object.keys(reactions).find((emoji) => reactions[emoji].includes(userId)) || null : null, likesCount: likes.length, liked: userId ? likes.includes(userId) : false };
+};
+const notify = (db, userId, data) => {
+  if (!userId || userId === data.actorId) return;
+  const notification = { id: uid('n'), userId, ...data, read: false, createdAt: new Date().toISOString() };
+  db.notifications ||= []; db.notifications.unshift(notification); realtime.emit(EV.NOTIFY, notification);
 };
 const dateKey = (m) => m.eventDate || m.createdAt;
 
@@ -175,9 +184,12 @@ export async function createMemory(p) {
     id: uid('m'), title: p.title.trim(), description: p.description.trim(), year: Number(p.year),
     type: p.type, batch: p.batch, eventDate: p.eventDate || null, tags: p.tags || [], related: p.related || '',
     images: (p.images || []).slice(0, 4), contributor: { id: u.id, name: u.name }, status: STATUS.PENDING,
-    likes: [], createdAt: new Date().toISOString(), duplicateOf: dups[0]?.id || null, duplicateScore: dups[0]?.score || null, rejectReason: null,
+    likes: [], comments: [], reactions: { '❤️': [], '😂': [], '😢': [], '🔥': [] }, engagement: [], featured: false, flagged: false,
+    createdAt: new Date().toISOString(), duplicateOf: dups[0]?.id || null, duplicateScore: dups[0]?.score || null, rejectReason: null,
   };
   db.memories.unshift(m);
+  write(db);
+  db.users.filter((x) => x.role === ROLES.ADMIN).forEach((admin) => notify(db, admin.id, { type: 'new_pending', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} submitted a memory for review` }));
   write(db);
   realtime.emit(EV.NEW, { id: m.id, title: m.title, by: u.name });
   if (dups.length) realtime.emit(EV.DUPLICATE, { id: m.id, title: m.title, of: dups[0] });
@@ -199,9 +211,48 @@ export async function toggleLike(id) {
   const m = db.memories.find((x) => x.id === id);
   if (!m) throw fail('Memory not found', 404);
   m.likes = m.likes.includes(u.id) ? m.likes.filter((x) => x !== u.id) : [...m.likes, u.id];
+  if (m.likes.includes(u.id)) { (m.engagement ||= []).push({ type: 'like', userId: u.id, at: new Date().toISOString() }); notify(db, m.contributor.id, { type: 'like', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} liked your memory` }); }
   write(db);
   return { liked: m.likes.includes(u.id), likesCount: m.likes.length };
 }
+
+export async function addComment(id, text) {
+  await delay(100); const db = read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id);
+  if (!m || m.status !== STATUS.APPROVED) throw fail('Memory not found', 404);
+  const value = String(text || '').trim(); if (value.length < 1 || value.length > 300) throw fail('Comment must be 1–300 characters');
+  const comment = { id: uid('c'), userId: u.id, userName: u.name, text: value, createdAt: new Date().toISOString() };
+  (m.comments ||= []).push(comment); notify(db, m.contributor.id, { type: 'comment', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} commented on your memory` });
+  write(db); return { comment, comments: m.comments };
+}
+export async function deleteComment(id, commentId) {
+  const db = read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id); const c = m?.comments?.find((x) => x.id === commentId);
+  if (!c) throw fail('Comment not found', 404); if (c.userId !== u.id && u.role !== ROLES.ADMIN) throw fail('You cannot delete this comment', 403);
+  m.comments = m.comments.filter((x) => x.id !== commentId); write(db); return { comments: m.comments };
+}
+export async function toggleReaction(id, emoji) {
+  const db = read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id);
+  if (!m || m.status !== STATUS.APPROVED) throw fail('Memory not found', 404);
+  if (!['❤️', '😂', '😢', '🔥'].includes(emoji)) throw fail('Unsupported reaction');
+  m.reactions ||= { '❤️': [], '😂': [], '😢': [], '🔥': [] };
+  Object.keys(m.reactions).forEach((key) => { m.reactions[key] = (m.reactions[key] || []).filter((id) => id !== u.id); });
+  if (!(m.reactions[emoji] || []).includes(u.id)) { m.reactions[emoji].push(u.id); (m.engagement ||= []).push({ type: 'reaction', userId: u.id, at: new Date().toISOString() }); notify(db, m.contributor.id, { type: 'reaction', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} reacted ${emoji} to your memory` }); }
+  write(db); return toClient(m, u.id);
+}
+export async function setFeatured(id, featured) { const db = read(); requireAdmin(db); const m = db.memories.find((x) => x.id === id); if (!m) throw fail('Memory not found', 404); m.featured = !!featured; write(db); return toClient(m); }
+export async function listFeatured() { const db = read(); const u = session(db); return db.memories.filter((m) => m.status === STATUS.APPROVED && m.featured).map((m) => toClient(m, u?.id)); }
+export async function createCollection(payload) { const db = read(); const u = requireAdmin(db); const c = { id: uid('col'), name: payload.name.trim(), description: payload.description?.trim() || '', memoryIds: [], createdAt: new Date().toISOString(), createdBy: u.id }; if (!c.name) throw fail('Collection name is required'); (db.collections ||= []).push(c); write(db); return c; }
+export async function addToCollection(id, memoryId) { const db = read(); requireAdmin(db); const c = db.collections.find((x) => x.id === id); const m = db.memories.find((x) => x.id === memoryId && x.status === STATUS.APPROVED); if (!c || !m) throw fail('Collection or memory not found', 404); if (!c.memoryIds.includes(memoryId)) c.memoryIds.push(memoryId); write(db); return c; }
+export async function listCollections() { const db = read(); return db.collections || []; }
+export async function getCollection(id) { const db = read(); const c = (db.collections || []).find((x) => x.id === id); if (!c) throw fail('Collection not found', 404); return { ...c, memories: c.memoryIds.map((mid) => db.memories.find((m) => m.id === mid)).filter(Boolean).map((m) => toClient(m, session(db)?.id)) }; }
+export async function getContributor(id) { const db = read(); const rows = db.memories.filter((m) => m.contributor.id === id && m.status === STATUS.APPROVED); const user = db.users.find((u) => u.id === id); if (!user) throw fail('Contributor not found', 404); const likes = rows.reduce((n, m) => n + m.likes.length, 0); return { id, name: user.name, batch: user.batch, memories: rows.map((m) => toClient(m, session(db)?.id)), totalLikes: likes, badges: [...(rows.length >= 1 ? ['First Memory'] : []), ...(rows.length >= 5 ? ['5 Memories'] : []), ...(rows.length && rows.some((m) => m.likes.length === Math.max(...rows.map((x) => x.likes.length))) ? ['Most Liked'] : [])] }; }
+export async function editOwnMemory(id, changes) { const db = read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id && x.contributor.id === u.id); if (!m || ![STATUS.PENDING, STATUS.REJECTED].includes(m.status)) throw fail('Only pending or rejected memories can be edited', 403); Object.assign(m, { title: changes.title.trim(), description: changes.description.trim(), year: Number(changes.year), type: changes.type, eventDate: changes.eventDate || null, images: changes.images || m.images, tags: changes.tags || m.tags, related: changes.related ?? m.related, batch: changes.batch || `Batch ${Number(changes.year)}` }); if (m.status === STATUS.REJECTED) { m.status = STATUS.PENDING; m.rejectReason = null; } write(db); return toClient(m, u.id); }
+export async function deleteOwnMemory(id) { const db = read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id && x.contributor.id === u.id); if (!m || m.status !== STATUS.PENDING) throw fail('Only pending memories can be deleted', 403); db.memories = db.memories.filter((x) => x.id !== id); write(db); return true; }
+export async function reportMemory(id, reason = '') { const db = read(); const u = requireUser(db); const m = db.memories.find((x) => x.id === id); if (!m) throw fail('Memory not found', 404); m.flagged = true; m.reportReason = reason || 'Reported by a community member'; write(db); db.users.filter((x) => x.role === ROLES.ADMIN).forEach((admin) => notify(db, admin.id, { type: 'report', memoryId: m.id, memoryTitle: m.title, actorId: u.id, actorName: u.name, text: `${u.name} reported “${m.title}”` })); write(db); return true; }
+export async function listFlagged() { const db = read(); requireAdmin(db); return db.memories.filter((m) => m.flagged).map((m) => toClient(m)); }
+export async function listNotifications() { const db = read(); const u = requireUser(db); return (db.notifications || []).filter((n) => n.userId === u.id).slice(0, 100); }
+export async function unreadCount() { return (await listNotifications()).filter((n) => !n.read).length; }
+export async function markNotificationRead(id) { const db = read(); const u = requireUser(db); const n = db.notifications.find((x) => x.id === id && x.userId === u.id); if (n) n.read = true; write(db); return n; }
+export async function markAllRead() { const db = read(); const u = requireUser(db); (db.notifications || []).filter((n) => n.userId === u.id).forEach((n) => { n.read = true; }); write(db); return true; }
 
 /* ---------------- admin ---------------- */
 export async function adminList({ status = STATUS.PENDING, page = 1, limit = 20 } = {}) {
@@ -226,6 +277,7 @@ export async function reviewMemory(id, { status, reason }) {
   if (!m) throw fail('Memory not found', 404);
   m.status = status;
   m.rejectReason = status === STATUS.REJECTED ? reason || 'Not suitable for the timeline' : null;
+  notify(db, m.contributor.id, { type: status, memoryId: m.id, memoryTitle: m.title, actorId: session(db).id, actorName: session(db).name, text: status === STATUS.APPROVED ? `Your memory “${m.title}” was approved` : `Your memory was rejected: ${m.rejectReason}` });
   write(db);
   if (status === STATUS.APPROVED) realtime.emit(EV.PUBLISHED, toClient(m));
   realtime.emit(EV.REVIEWED, { id: m.id, title: m.title, status, reason: m.rejectReason, userId: m.contributor.id });

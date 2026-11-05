@@ -27,6 +27,7 @@ export default function Admin() {
   const [reason, setReason] = useState('');
   const [edit, setEdit] = useState(null);
   const [view, setView] = useState(null);
+  const [flagged, setFlagged] = useState([]);
 
   const load = useCallback(async (p = 1, append = false) => {
     if (!append) setLoading(true);
@@ -39,6 +40,7 @@ export default function Admin() {
   }, [tab]);
 
   useEffect(() => { load(1); }, [load]);
+  useEffect(() => { memoryApi.listFlagged().then(setFlagged).catch(() => {}); }, [data]);
   useEffect(() => {
     let t;
     const soon = () => { clearTimeout(t); t = setTimeout(() => load(1), 400); };
@@ -61,6 +63,7 @@ export default function Admin() {
       <h1 className="text-3xl font-extrabold sm:text-4xl">Review queue</h1>
       <p className="mt-1 text-slate-500">Approve memories to publish them. Changing a date or year of a published memory updates everyone’s timeline live.</p>
 
+      {flagged.length > 0 && <section className="card mt-5 p-4"><h2 className="font-bold">Reported memories ({flagged.length})</h2><div className="mt-2 flex flex-wrap gap-2">{flagged.map((m) => <button key={m.id} onClick={() => setView(m)} className="chip">{m.title}</button>)}</div></section>}
       <div className="no-scrollbar mt-8 flex gap-2 overflow-x-auto">
         {TABS.map((s) => (
           <button key={s} onClick={() => setTab(s)} className={`chip capitalize ${tab === s ? 'chip-on' : ''}`}>{s} <span className="text-xs opacity-60">{data.counts?.[s] ?? 0}</span></button>
@@ -91,6 +94,7 @@ export default function Admin() {
             </div>
             <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-900/5 pt-4 dark:border-white/10">
               <Button variant="ghost" size="sm" onClick={() => setEdit({ ...m })}>Edit date or year</Button>
+              {m.status === STATUS.APPROVED && <Button variant="ghost" size="sm" onClick={() => act(m.id, () => memoryApi.setFeatured(m.id, !m.featured), m.featured ? 'Removed from featured' : 'Pinned to home')}>{m.featured ? 'Unpin feature' : 'Pin feature'}</Button>}
               {m.status !== STATUS.REJECTED && <Button variant="secondary" size="sm" disabled={busyId === m.id} onClick={() => { setReject(m); setReason(''); }}>Reject</Button>}
               {m.status !== STATUS.APPROVED && <Button variant="success" size="sm" loading={busyId === m.id} onClick={() => approve(m)}><Icon name="check" className="h-4 w-4" /> Approve and publish</Button>}
             </div>

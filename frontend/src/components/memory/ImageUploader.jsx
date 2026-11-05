@@ -16,7 +16,7 @@ export default function ImageUploader({ value = [], onChange, error }) {
     try {
       const out = [];
       for (const f of files) {
-        if (!f.type.startsWith('image/')) { setMsg('Only photos (JPG, PNG, WebP) are allowed.'); continue; }
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { setMsg('Only photos (JPG, PNG, WebP) are allowed.'); continue; }
         if (f.size > 15 * 1024 * 1024) { setMsg('Each photo must be under 15 MB.'); continue; }
         out.push(await compressImage(f));
       }

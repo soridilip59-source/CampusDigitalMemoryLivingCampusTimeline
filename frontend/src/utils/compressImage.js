@@ -1,5 +1,5 @@
 /** Shrinks photos in the browser before upload (keeps the server and network light under heavy use). */
-export function compressImage(file, maxW = 1280, quality = 0.72) {
+export function compressImage(file, maxW = 1200, quality = 0.72) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();

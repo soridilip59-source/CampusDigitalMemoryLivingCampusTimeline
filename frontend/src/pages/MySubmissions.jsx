@@ -8,6 +8,8 @@ import StatusBadge from '../components/common/StatusBadge';
 import Button from '../components/common/Button';
 import { EmptyState, ErrorState, PageLoader } from '../components/common/Loader';
 import MemoryDetail from '../components/memory/MemoryDetail';
+import Modal from '../components/common/Modal';
+import MemoryForm from '../components/memory/MemoryForm';
 
 const TABS = [['all', 'All'], [STATUS.PENDING, 'Pending'], [STATUS.APPROVED, 'Approved'], [STATUS.REJECTED, 'Rejected']];
 
@@ -16,6 +18,7 @@ export default function MySubmissions() {
   const [error, setError] = useState('');
   const [tab, setTab] = useState('all');
   const [open, setOpen] = useState(null);
+  const [editing, setEditing] = useState(null);
 
   const load = useCallback(() => memoryApi.mine().then(setItems).catch((e) => setError(e.message)), []);
   useEffect(() => { load(); return realtime.on(EV.REVIEWED, load); }, [load]);
@@ -53,6 +56,8 @@ export default function MySubmissions() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2"><StatusBadge status={m.status} /><span className="text-xs text-slate-500">{m.year} · sent {timeAgo(m.createdAt)}</span></div>
               <h3 className="mt-1.5 truncate text-lg font-bold">{m.title}</h3>
+              <p className="mt-1 text-xs text-slate-500">♥ {m.likesCount || 0} likes · {Object.values(m.reactionCounts || {}).reduce((a, n) => a + n, 0)} reactions · {m.comments?.length || 0} comments</p>
+              {(m.status === STATUS.PENDING || m.status === STATUS.REJECTED) && <div className="mt-2 flex gap-3"><button className="text-sm font-semibold text-brand-600" onClick={() => setEditing(m)}>Edit</button>{m.status === STATUS.PENDING && <button className="text-sm font-semibold text-rose-600" onClick={async () => { if (!window.confirm('Delete this pending memory?')) return; try { await memoryApi.deleteOwn(m.id); load(); } catch (e) { setError(e.message); } }}>Delete</button>}</div>}
               <p className="line-clamp-2 text-sm text-slate-600 dark:text-slate-400">{m.description}</p>
               {m.status === STATUS.REJECTED && m.rejectReason && <p className="mt-2 rounded-lg bg-rose-50 px-3 py-1.5 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"><b>Admin note:</b> {m.rejectReason}</p>}
               {m.status === STATUS.PENDING && m.duplicateOf && <p className="mt-2 text-xs font-medium text-amber-600">Flagged as a possible duplicate. An admin will compare it with the earlier entry.</p>}
@@ -61,6 +66,7 @@ export default function MySubmissions() {
         ))}
       </div>
       <MemoryDetail memory={open} onClose={() => setOpen(null)} />
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit your memory" size="lg"><div className="p-5 pt-12"><h2 className="mb-4 text-xl font-bold">Edit submission</h2>{editing && <MemoryForm initial={{ ...editing, tags: editing.tags?.join(', ') || '' }} onSubmit={async (v) => { try { await memoryApi.editOwn(editing.id, v); setEditing(null); load(); } catch (e) { setError(e.message); } }} submitting={false} defaultBatch={editing.batch} />}</div></Modal>
     </div>
   );
 }

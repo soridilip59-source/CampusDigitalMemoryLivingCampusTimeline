@@ -3,11 +3,11 @@
 @tailwind utilities;
 
 @layer base {
-  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 16px); }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 16px); --accent-color: #7c5cff; }
   body { @apply bg-paper font-sans text-ink antialiased dark:bg-night dark:text-slate-200; }
   h1, h2, h3, h4 { @apply font-display tracking-tight; }
   ::selection { @apply bg-brand-500 text-white; }
-  :focus-visible { @apply outline-2 outline-offset-2 outline-brand-500; }
+  :focus-visible { @apply outline-2 outline-offset-2 outline-brand-500; outline-color: var(--accent-color); }
 }
 
 @layer components {
@@ -20,5 +20,10 @@
     @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold ring-1 ring-slate-200 transition
     hover:ring-brand-400 dark:ring-white/10 dark:hover:ring-brand-400;
   }
-  .chip-on { @apply bg-ink text-white ring-ink dark:bg-white dark:text-ink dark:ring-white; }
+  .chip-on { @apply text-white; background-color: var(--accent-color); --tw-ring-color: var(--accent-color); }
+  .accent-surface { background-color: color-mix(in srgb, var(--accent-color) 12%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

@@ -11,6 +11,7 @@ export const SOCKET_EVENTS = {
   PUBLISHED: 'memory:published',
   UPDATED: 'memory:updated',
   REVIEWED: 'memory:reviewed',
+  NOTIFY: 'notification:new',
 };
 
 export const START_YEAR = 2018;
