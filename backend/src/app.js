@@ -28,5 +28,43 @@ app.get("/", (req, res) => {
   });
 });
 
+
+
+
+
+// Global error handling middleware
+app.use((err, req, res, next) => {
+  console.error("API Error:", err.message);
+
+  if (err instanceof require("multer").MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        success: false,
+        message: "File size cannot exceed 50 MB"
+      });
+    }
+
+    if (err.code === "LIMIT_UNEXPECTED_FILE") {
+      return res.status(400).json({
+        success: false,
+        message: "Maximum 5 media files are allowed"
+      });
+    }
+  }
+
+  if (err.message === "Only supported images and videos are allowed") {
+    return res.status(400).json({
+      success: false,
+      message: err.message
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    message: "Something went wrong"
+  });
+});
+
+
 module.exports = app;
 

@@ -2,9 +2,39 @@ const User = require("../models/User");
 const Notification = require("../models/Notification");
 const Memory = require("../models/Memory");
 
+ const uploadToCloudinary = require("../utils/cloudinaryUpload");
+
+
+
+ // Upload multiple files to Cloudinary
+const uploadMemoryMedia = async (files) => {
+  const uploadedMedia = [];
+
+  for (const file of files) {
+    const result = await uploadToCloudinary(
+      file.buffer,
+      "campus-digital-memory"
+    );
+
+    uploadedMedia.push({
+      url: result.url,
+      type: result.resourceType === "video" ? "video" : "image",
+      altText: file.originalname
+    });
+  }
+
+  return uploadedMedia;
+};
+
+
+
+
+
+
+
+
 
 //submit a new campus memory
-
 
 const createMemory = async (req, res) => {
   try {
@@ -25,6 +55,14 @@ const createMemory = async (req, res) => {
       });
     }
 
+
+    // Upload media files to Cloudinary
+const media = req.files?.length
+  ? await uploadMemoryMedia(req.files)
+  : [];
+
+
+
     // Save memory in MongoDB
     const memory = await Memory.create({
       title,
@@ -33,6 +71,7 @@ const createMemory = async (req, res) => {
       eventDate: eventDate || undefined,
       category,
       tags: tags || [],
+      media,
       submittedBy: req.user._id,
       status: "pending"
     });
