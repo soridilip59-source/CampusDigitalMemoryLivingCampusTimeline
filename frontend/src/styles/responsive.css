@@ -1,0 +1,19 @@
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* outlined giant year numerals: the signature of the timeline */
+.year-outline { -webkit-text-stroke: 2px currentColor; color: transparent; }
+
+.skeleton { position: relative; overflow: hidden; }
+.skeleton::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+  animation: shimmer 1.4s infinite;
+}
+.dark .skeleton::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.07), transparent); }
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+@media (max-width: 640px) { .year-outline { -webkit-text-stroke-width: 1.5px; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
