@@ -31,10 +31,10 @@ const memoryValidator = [
     .isIn([
       "event",
       "achievement",
-      "culture",
-      "workshop",
-      "campus-life",
-      "other"
+      "cultural",
+      "learning",
+      "infrastructure",
+      "project"
     ])
     .withMessage("Invalid memory category")
 ];
