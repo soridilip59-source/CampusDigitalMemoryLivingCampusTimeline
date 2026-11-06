@@ -15,7 +15,7 @@ const userRoutes = require("./routes/userRoutes");
 
 // Middleware
 const allowedOrigins = [
-  "http://localhost:5173",
+  "https://campusdigitalmemorylivingcampustimeline-1.onrender.com",
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
