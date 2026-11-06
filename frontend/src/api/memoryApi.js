@@ -7,9 +7,20 @@ const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !=
 // Images are compressed data-URLs in the browser; send them as real files to the backend.
 async function toFormData(p) {
   const fd = new FormData();
-  Object.entries(p).forEach(([k, v]) => { if (k !== 'images' && k !== 'tags') fd.append(k, v ?? ''); });
-  (p.tags || []).forEach((t) => fd.append('tags[]', t));
-  for (const [i, src] of (p.images || []).entries()) fd.append('images', await (await fetch(src)).blob(), `photo-${i}.jpg`);
+  const fields = { description: 'story', type: 'category' };
+  Object.entries(p).forEach(([key, value]) => {
+    if (key !== 'images' && key !== 'tags') fd.append(fields[key] || key, value ?? '');
+  });
+  if (Object.hasOwn(p, 'images')) fd.append('imagesProvided', 'true');
+  (p.tags || []).forEach((tag) => fd.append('tags', tag));
+  for (const [i, src] of (p.images || []).entries()) {
+    if (src.startsWith('http')) {
+      fd.append('existingImages', src);
+      continue;
+    }
+    const blob = await (await fetch(src)).blob();
+    fd.append('media', blob, `photo-${i}.${blob.type.split('/')[1] || 'jpg'}`);
+  }
   return fd;
 }
 
@@ -18,10 +29,10 @@ export const list = (params) => (USE_MOCK ? mock.listMemories(params) : api.get(
 export const getStats = () => (USE_MOCK ? mock.getStats() : api.get('/memories/stats'));
 export const getHomeExtras = () => (USE_MOCK ? mock.getHomeExtras() : api.get('/memories/home-extras'));
 export const setFeatured = (id, featured) => (USE_MOCK ? mock.setFeatured(id, featured) : api.patch(`/admin/memories/${id}`, { featured }));
-export const getById = (id) => (USE_MOCK ? mock.getMemory(id) : api.get(`/memories/${id}`));
+export const getById = (id) => (USE_MOCK ? mock.getMemory(id) : api.get(`/memories/${id}`).then((r) => r.memory));
 export const checkDuplicates = (body) => (USE_MOCK ? mock.checkDuplicates(body) : api.post('/memories/check-duplicates', body));
 export const create = async (body) => (USE_MOCK ? mock.createMemory(body) : api.post('/memories', await toFormData(body)));
-export const mine = () => (USE_MOCK ? mock.myMemories() : api.get('/memories/mine'));
+export const mine = () => (USE_MOCK ? mock.myMemories() : api.get('/memories/mine').then((r) => r.memories));
 export const toggleLike = (id) => (USE_MOCK ? mock.toggleLike(id) : api.post(`/memories/${id}/like`));
 export const toggleReaction = (id, emoji) => (USE_MOCK ? mock.toggleReaction(id, emoji) : api.post(`/memories/${id}/reactions`, { emoji }));
 export const addComment = (id, text) => (USE_MOCK ? mock.addComment(id, text) : api.post(`/memories/${id}/comments`, { text }));
@@ -30,7 +41,9 @@ export const listNotifications = () => (USE_MOCK ? mock.listNotifications() : ap
 export const unreadCount = () => (USE_MOCK ? mock.unreadCount() : api.get('/notifications/unread-count'));
 export const markNotificationRead = (id) => (USE_MOCK ? mock.markNotificationRead(id) : api.patch(`/notifications/${id}/read`));
 export const markAllRead = () => (USE_MOCK ? mock.markAllRead() : api.patch('/notifications/read-all'));
-export const editOwn = (id, body) => (USE_MOCK ? mock.editOwnMemory(id, body) : api.patch(`/memories/${id}`, body));
+export const editOwn = async (id, body) => (
+  USE_MOCK ? mock.editOwnMemory(id, body) : api.patch(`/memories/${id}`, await toFormData(body))
+);
 export const deleteOwn = (id) => (USE_MOCK ? mock.deleteOwnMemory(id) : api.delete(`/memories/${id}`));
 export const report = (id, reason) => (USE_MOCK ? mock.reportMemory(id, reason) : api.post(`/memories/${id}/report`, { reason }));
 export const listReported = () => (USE_MOCK ? mock.listReported() : api.get('/admin/memories/reported'));

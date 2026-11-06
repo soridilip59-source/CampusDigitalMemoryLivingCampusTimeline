@@ -1,5 +1,8 @@
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+export const GOOGLE_LOGIN_ENABLED = !USE_MOCK && Boolean(GOOGLE_CLIENT_ID);
 export const TOKEN_KEY = 'cdm_token';
 
 export const STATUS = { PENDING: 'pending', APPROVED: 'approved', REJECTED: 'rejected' };

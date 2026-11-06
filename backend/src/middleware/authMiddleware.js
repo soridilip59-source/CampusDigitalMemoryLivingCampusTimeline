@@ -47,4 +47,21 @@ const protect = async (req, res, next) => {
   }
 };
 
-module.exports = { protect };
+const optionalProtect = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = await User.findById(decoded.id);
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: "Not authorized, token invalid or expired",
+    });
+  }
+  return next();
+};
+
+module.exports = { protect, optionalProtect };

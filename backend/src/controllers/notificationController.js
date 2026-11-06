@@ -1,40 +1,24 @@
 const Notification = require("../models/Notification");
 const mongoose = require("mongoose");
+const { idOf } = require("../utils/memoryPresenter");
+
+const presentNotification = (notification) => ({
+  id: idOf(notification._id),
+  memoryId: idOf(notification.memory?._id || notification.memory),
+  actorName: notification.actorName || "",
+  text: notification.text || notification.message,
+  type: notification.type,
+  read: notification.isRead,
+  createdAt: notification.createdAt,
+});
+
 // Get logged-in user's notifications
 const getMyNotifications = async (req, res) => {
   try {
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
-
-    const skip = (page - 1) * limit;
-
-    const [notifications, totalNotifications, unreadCount] = await Promise.all([
-      Notification.find({
-        recipient: req.user._id,
-      })
-        .populate("memory", "title year category")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-
-      Notification.countDocuments({
-        recipient: req.user._id,
-      }),
-
-      Notification.countDocuments({
-        recipient: req.user._id,
-        isRead: false,
-      }),
-    ]);
-
-    return res.status(200).json({
-      success: true,
-      totalNotifications,
-      unreadCount,
-      currentPage: page,
-      totalPages: Math.ceil(totalNotifications / limit),
-      notifications,
-    });
+    const notifications = await Notification.find({ recipient: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(100);
+    return res.status(200).json(notifications.map(presentNotification));
   } catch (error) {
     console.error("Get notifications error:", error);
 
@@ -42,6 +26,19 @@ const getMyNotifications = async (req, res) => {
       success: false,
       message: "Failed to fetch notifications",
     });
+  }
+};
+
+const getUnreadCount = async (req, res) => {
+  try {
+    const count = await Notification.countDocuments({
+      recipient: req.user._id,
+      isRead: false,
+    });
+    return res.status(200).json(count);
+  } catch (error) {
+    console.error("Unread notifications count error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch unread notifications" });
   }
 };
 
@@ -120,6 +117,7 @@ const markAllNotificationsAsRead = async (req, res) => {
 
 module.exports = {
   getMyNotifications,
+  getUnreadCount,
   markNotificationAsRead,
   markAllNotificationsAsRead,
 };

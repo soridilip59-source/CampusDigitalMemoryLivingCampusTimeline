@@ -1,5 +1,21 @@
 const mongoose = require("mongoose");
 
+const commentSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    text: { type: String, required: true, trim: true, maxlength: 300 },
+  },
+  { timestamps: true },
+);
+
+const reportSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    reason: { type: String, required: true },
+  },
+  { timestamps: true },
+);
+
 const memorySchema = new mongoose.Schema(
   {
    title: {
@@ -31,13 +47,15 @@ const memorySchema = new mongoose.Schema(
       enum: [
         "event",
         "achievement",
-        "culture",
-        "workshop",
-        "campus-life",
-        "other"
+        "cultural",
+        "learning",
+        "infrastructure",
+        "project"
       ],
       required: true
     },
+    batch: { type: String, trim: true, default: "" },
+    related: { type: String, trim: true, default: "" },
 
     tags: [{
       type: String,
@@ -80,6 +98,17 @@ const memorySchema = new mongoose.Schema(
       type: String,
       trim: true
     },
+    featured: { type: Boolean, default: false },
+    likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    likeEvents: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, at: { type: Date, default: Date.now } }],
+    reactions: [{
+      user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      emoji: { type: String, enum: ["❤️", "😂", "😢", "🔥"], required: true },
+    }],
+    comments: [commentSchema],
+    reports: [reportSchema],
+    duplicateOf: { type: mongoose.Schema.Types.ObjectId, ref: "Memory" },
+    duplicateScore: { type: Number },
 
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -98,6 +127,7 @@ const memorySchema = new mongoose.Schema(
 // Improve common database queries
 memorySchema.index({ status: 1, year: -1 });
 memorySchema.index({ submittedBy: 1, createdAt: -1 });
+memorySchema.index({ featured: 1, status: 1 });
 const Memory = mongoose.model("Memory", memorySchema);
 
 module.exports = Memory;

@@ -2,6 +2,9 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { OAuth2Client } = require("google-auth-library");
+
+const googleClient = new OAuth2Client();
 
 // Generate JWT token
 const generateToken = (userId) => {
@@ -108,7 +111,7 @@ const login = async (req, res) => {
       email: email.toLowerCase().trim()
     }).select("+password");
 
-    if (!user) {
+    if (!user || !user.password) {
       return res.status(401).json({
         success: false,
         message: "Invalid email or password"
@@ -154,6 +157,105 @@ const login = async (req, res) => {
   }
 };
 
+// Verify the Google ID token on the server before creating a local session.
+const googleLogin = async (req, res) => {
+  const { credential } = req.body || {};
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+
+  if (!credential) {
+    return res.status(400).json({
+      success: false,
+      message: "Google credential is required"
+    });
+  }
+
+  if (!clientId) {
+    return res.status(503).json({
+      success: false,
+      message: "Google login is not configured"
+    });
+  }
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: clientId
+    });
+    payload = ticket.getPayload();
+  } catch (error) {
+    console.error("Google token verification error:", error.message);
+    return res.status(401).json({
+      success: false,
+      message: "Invalid Google sign-in credential"
+    });
+  }
+
+  if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+    return res.status(401).json({
+      success: false,
+      message: "Google account must have a verified email address"
+    });
+  }
+
+  try {
+    const email = payload.email.toLowerCase().trim();
+    let user = await User.findOne({ googleId: payload.sub });
+
+    if (!user) {
+      user = await User.findOne({ email });
+
+      if (user?.googleId && user.googleId !== payload.sub) {
+        return res.status(409).json({
+          success: false,
+          message: "This email is already linked to another Google account"
+        });
+      }
+
+      if (user) {
+        user.googleId = payload.sub;
+        await user.save();
+      } else {
+        const googleName = typeof payload.name === "string" ? payload.name.trim().slice(0, 50) : "";
+        user = await User.create({
+          googleId: payload.sub,
+          name: googleName.length >= 2 ? googleName : "Google User",
+          email,
+          role: "contributor"
+        });
+      }
+    }
+
+    const token = generateToken(user._id);
+    return res.status(200).json({
+      success: true,
+      message: "User logged in successfully",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        batch: user.batch,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error("Google login error:", error);
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "An account with this email already exists"
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Google login failed"
+    });
+  }
+};
+
 // Get currently logged-in user
 const getMe = async (req, res) => {
   return res.status(200).json({
@@ -171,5 +273,6 @@ const getMe = async (req, res) => {
 module.exports = {
   register,
   login,
+  googleLogin,
   getMe
 };

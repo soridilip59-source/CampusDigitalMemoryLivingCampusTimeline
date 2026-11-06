@@ -20,7 +20,7 @@ export default function Register() {
     const v = {};
     if (f.name.trim().length < 2) v.name = 'Enter your full name.';
     if (!/^\S+@\S+\.\S+$/.test(f.email)) v.email = 'Enter a valid email.';
-    if (f.password.length < 6) v.password = 'Use at least 6 characters.';
+    if (f.password.length < 8) v.password = 'Use at least 8 characters.';
     setErrors(v);
     if (Object.keys(v).length) return;
     setBusy(true);

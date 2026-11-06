@@ -1,5 +1,6 @@
 const Memory = require("../models/Memory");
 const Notification = require("../models/Notification");
+const { presentMemory } = require("../utils/memoryPresenter");
 
 // Get all pending memories
 const getPendingMemories = async (req, res) => {
@@ -15,15 +16,35 @@ const getPendingMemories = async (req, res) => {
       });
     }
 
-    const memories = await Memory.find({ status })
-      .populate("submittedBy", "name email batch")
-      .sort({ createdAt: -1 });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const [memories, total, pending, approved, rejected, reported] = await Promise.all([
+      Memory.find({ status })
+        .populate("submittedBy", "name email batch")
+        .populate("duplicateOf", "title")
+        .populate("comments.user", "name")
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Memory.countDocuments({ status }),
+      Memory.countDocuments({ status: "pending" }),
+      Memory.countDocuments({ status: "approved" }),
+      Memory.countDocuments({ status: "rejected" }),
+      Memory.countDocuments({ "reports.0": { $exists: true } }),
+    ]);
 
     return res.status(200).json({
       success: true,
       status,
-      count: memories.length,
-      memories,
+      count: total,
+      total,
+      page,
+      hasMore: page * limit < total,
+      counts: { pending, approved, rejected, reported },
+      items: memories.map((memory) => ({
+        ...presentMemory(memory, req.user._id),
+        duplicateTitle: memory.duplicateOf?.title || null,
+      })),
     });
   } catch (error) {
     console.error("Admin memories error:", error);
@@ -146,7 +167,7 @@ try {
 const rejectMemory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { rejectionReason } = req.body;
+    const rejectionReason = req.body?.reason || req.body?.rejectionReason;
 
     if (!rejectionReason || !rejectionReason.trim()) {
       return res.status(400).json({
@@ -217,6 +238,84 @@ try {
 }
 };
 
+const reviewMemory = async (req, res) => {
+  const { status, reason } = req.body || {};
+  if (!["approved", "rejected"].includes(status)) {
+    return res.status(400).json({ success: false, message: "Invalid review status" });
+  }
+  if (status === "rejected" && !String(reason || "").trim()) {
+    return res.status(400).json({ success: false, message: "Rejection reason is required" });
+  }
+  const memory = await Memory.findById(req.params.id).populate("submittedBy", "name batch");
+  if (!memory) return res.status(404).json({ success: false, message: "Memory not found" });
+  memory.status = status;
+  memory.rejectionReason = status === "rejected" ? String(reason).trim() : undefined;
+  if (status === "approved") {
+    memory.approvedBy = req.user._id;
+    memory.approvedAt = new Date();
+  }
+  await memory.save();
+  const io = req.app.get("io");
+  const result = presentMemory(memory, req.user._id);
+  if (io) {
+    if (status === "approved") io.emit("memory:published", result);
+    io.emit("memory:reviewed", {
+      id: result.id,
+      title: result.title,
+      status,
+      reason: result.rejectReason,
+      userId: result.contributor.id,
+    });
+  }
+  const type = status === "approved" ? "memory:approved" : "memory:rejected";
+  const message = status === "approved"
+    ? `Your memory "${memory.title}" has been approved.`
+    : `Your memory "${memory.title}" was rejected. Reason: ${memory.rejectionReason}`;
+  const notification = await Notification.create({
+    recipient: memory.submittedBy._id,
+    memory: memory._id,
+    type,
+    title: memory.title,
+    message,
+    actorName: req.user.name,
+    text: message,
+  });
+  if (io) {
+    io.to(`user:${String(memory.submittedBy._id)}`).emit("notification:new", {
+      id: String(notification._id),
+      memoryId: String(memory._id),
+      actorName: req.user.name,
+      text: message,
+      type,
+      read: false,
+      createdAt: notification.createdAt,
+    });
+  }
+  return res.json(result);
+};
+
+const updateMemory = async (req, res) => {
+  const memory = await Memory.findById(req.params.id);
+  if (!memory) return res.status(404).json({ success: false, message: "Memory not found" });
+  const mapping = { description: "story", type: "category" };
+  for (const [field, value] of Object.entries(req.body || {})) {
+    const target = mapping[field] || field;
+    if (["year", "eventDate", "title", "story", "category", "featured"].includes(target)) {
+      memory[target] = value;
+    }
+  }
+  if (req.body?.year !== undefined && !req.body?.batch) memory.batch = `Batch ${req.body.year}`;
+  await memory.save();
+  const result = presentMemory(
+    await Memory.findById(memory._id).populate("submittedBy", "name batch"),
+    req.user._id,
+  );
+  const changed = Object.keys(req.body || {}).map((key) => key === "eventDate" ? "date" : key);
+  const io = req.app.get("io");
+  if (io && changed.length) io.emit("memory:updated", { memory: result, changed });
+  return res.json(result);
+};
+
 
 
 module.exports = {
@@ -224,4 +323,6 @@ module.exports = {
   approveMemory,
   rejectMemory,
   getDashboardStats,
+  reviewMemory,
+  updateMemory,
 };

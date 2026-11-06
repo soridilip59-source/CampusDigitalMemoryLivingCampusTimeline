@@ -6,6 +6,8 @@ const authRoutes = require("./routes/authRoutes");
 const memoryRoutes = require("./routes/memoryRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const collectionRoutes = require("./routes/collectionRoutes");
+const userRoutes = require("./routes/userRoutes");
 
  const app = express();
 
@@ -33,6 +35,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/memories", memoryRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/collections", collectionRoutes);
+app.use("/api/users", userRoutes);
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
@@ -47,6 +51,7 @@ app.get("/", (req, res) => {
 // Global error handling middleware
 app.use((err, req, res, next) => {
   console.error("API Error:", err.message);
+  if (res.headersSent) return next(err);
 
 // Handle invalid MongoDB ObjectId
 if (err.name === "CastError") {
@@ -54,6 +59,12 @@ if (err.name === "CastError") {
     success: false,
     message: "Invalid resource ID"
   });
+}
+if (err.name === "ValidationError") {
+  return res.status(400).json({ success: false, message: err.message });
+}
+if (err.code === 11000) {
+  return res.status(409).json({ success: false, message: "A record with these details already exists" });
 }
 
   if (err instanceof require("multer").MulterError) {
@@ -79,12 +90,11 @@ if (err.name === "CastError") {
     });
   }
 
-  return res.status(500).json({
+  return res.status(err.status || err.statusCode || 500).json({
     success: false,
-    message: "Something went wrong"
+    message: err.status || err.statusCode ? err.message : "Something went wrong"
   });
 });
 
 
 module.exports = app;
-

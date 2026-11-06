@@ -1,19 +1,31 @@
-import { SOCKET_EVENTS } from './constants';
+import { io } from 'socket.io-client';
+import { SOCKET_EVENTS, SOCKET_URL, USE_MOCK } from './constants';
 
 /**
- * Tiny pub/sub that mimics Socket.IO.
- * - Mock mode: BroadcastChannel syncs events between browser tabs (open 2 tabs: student + admin).
- * - When the backend is ready: replace the body of emit/on with socket.io-client
- *   (socket.on(event, cb) / socket.off(event, cb)). Nothing else in the app changes.
+ * Mock mode broadcasts between tabs; real mode receives authenticated Socket.IO events.
  */
 const listeners = new Map();
 const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('cdm-realtime') : null;
+let socket;
 
 const dispatch = (event, payload) => (listeners.get(event) || []).forEach((cb) => cb(payload));
 if (channel) channel.onmessage = (e) => dispatch(e.data.event, e.data.payload);
 
 export const realtime = {
+  setToken(token) {
+    if (USE_MOCK) return;
+    socket?.disconnect();
+    socket = null;
+    if (!token) return;
+    socket = io(SOCKET_URL, { auth: { token }, transports: ['websocket', 'polling'] });
+    socket.onAny(dispatch);
+  },
+  disconnect() {
+    socket?.disconnect();
+    socket = null;
+  },
   emit(event, payload) {
+    if (!USE_MOCK) return;
     dispatch(event, payload);
     channel?.postMessage({ event, payload });
   },

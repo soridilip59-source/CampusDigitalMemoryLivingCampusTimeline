@@ -19,9 +19,14 @@ match: [
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
   "Please enter a valid email"
 ]},
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
    password: {
   type: String,
-  required: true,
+  required: function () { return !this.googleId; },
   minlength: 8,
   select: false,
 },

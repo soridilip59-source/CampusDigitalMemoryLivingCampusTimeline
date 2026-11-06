@@ -2,6 +2,7 @@ const User = require("../models/User");
 const Notification = require("../models/Notification");
 const Memory = require("../models/Memory");
 const uploadToCloudinary = require("../utils/cloudinaryUpload");
+const { presentMemory } = require("../utils/memoryPresenter");
 
 // Upload multiple files to Cloudinary
 const uploadMemoryMedia = async (files) => {
@@ -32,6 +33,8 @@ const createMemory = async (req, res) => {
       year,
       eventDate,
       category,
+      batch,
+      related,
       tags,
     } = req.body || {};
 
@@ -43,6 +46,12 @@ const createMemory = async (req, res) => {
       });
     }
 
+    const duplicates = await Memory.find({
+      year: Number(year),
+      status: { $ne: "rejected" },
+      title: { $regex: String(title).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" },
+    }).select("title year status").limit(3);
+
     // Upload media files to Cloudinary
     const media = req.files?.length
       ? await uploadMemoryMedia(req.files)
@@ -51,6 +60,8 @@ const createMemory = async (req, res) => {
     // Format tags
     const formattedTags = Array.isArray(tags)
       ? tags
+      : typeof req.body?.["tags[]"] === "string"
+        ? [req.body["tags[]"]]
       : typeof tags === "string" && tags.trim()
         ? tags
             .split(",")
@@ -65,10 +76,14 @@ const createMemory = async (req, res) => {
       year: Number(year),
       eventDate: eventDate || undefined,
       category,
+      batch: batch || `Batch ${year}`,
+      related: related || "",
       tags: formattedTags,
       media,
       submittedBy: req.user._id,
       status: "pending",
+      duplicateOf: duplicates[0]?._id,
+      duplicateScore: duplicates.length ? 1 : undefined,
     });
 
     // Create notifications for admins
@@ -97,19 +112,44 @@ const createMemory = async (req, res) => {
 
     // Notify connected admins
     if (io) {
-      io.to("admins").emit("memory:submitted", {
+      const event = {
         memoryId: memory._id,
+        id: memory._id,
         title: memory.title,
         year: memory.year,
         category: memory.category,
         submittedBy: req.user._id,
-      });
+        by: req.user.name,
+      };
+      io.to("admins").emit("memory:submitted", event);
+      io.to("admins").emit("memory:new", event);
+      if (duplicates.length) {
+        io.to("admins").emit("memory:duplicate", {
+          id: String(memory._id),
+          title: memory.title,
+          of: {
+            id: String(duplicates[0]._id),
+            title: duplicates[0].title,
+            year: duplicates[0].year,
+            status: duplicates[0].status,
+            score: 1,
+          },
+        });
+      }
     }
 
+    const populatedMemory = await Memory.findById(memory._id).populate("submittedBy", "name batch");
     return res.status(201).json({
       success: true,
       message: "Memory submitted successfully",
-      memory,
+      memory: presentMemory(populatedMemory, req.user._id),
+      duplicates: duplicates.map((duplicate) => ({
+        id: String(duplicate._id),
+        title: duplicate.title,
+        year: duplicate.year,
+        status: duplicate.status,
+        score: 1,
+      })),
     });
   } catch (error) {
     console.error("Error submitting memory:", error);
@@ -125,8 +165,11 @@ const createMemory = async (req, res) => {
 const getApprovedMemories = async (req, res) => {
   try {
     const {
+      q,
       search,
       year,
+      batch,
+      type,
       category,
       page = 1,
       limit = 10,
@@ -148,6 +191,15 @@ const getApprovedMemories = async (req, res) => {
         { story: { $regex: safeSearch, $options: "i" } },
       ];
     }
+    if (q && q.trim()) {
+      const safeSearch = q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      filter.$or = [
+        { title: { $regex: safeSearch, $options: "i" } },
+        { story: { $regex: safeSearch, $options: "i" } },
+        { tags: { $regex: safeSearch, $options: "i" } },
+        { related: { $regex: safeSearch, $options: "i" } },
+      ];
+    }
 
     // Filter by year
     if (year) {
@@ -155,8 +207,11 @@ const getApprovedMemories = async (req, res) => {
     }
 
     // Filter by category
-    if (category) {
-      filter.category = category;
+    if (category || type) {
+      filter.category = category || type;
+    }
+    if (batch) {
+      filter.batch = batch;
     }
 
     // Pagination
@@ -164,10 +219,13 @@ const getApprovedMemories = async (req, res) => {
     const perPage = Math.min(50, Math.max(1, Number(limit) || 10));
     const skip = (currentPage - 1) * perPage;
 
+    const direction = req.query.sort === "asc" ? 1 : -1;
     const [memories, totalMemories] = await Promise.all([
       Memory.find(filter)
         .populate("submittedBy", "name batch")
-        .sort({ year: -1 })
+        .populate("comments.user", "name")
+        .populate("reports.user", "name")
+        .sort({ year: direction, eventDate: direction, createdAt: direction })
         .skip(skip)
         .limit(perPage),
 
@@ -179,7 +237,11 @@ const getApprovedMemories = async (req, res) => {
       totalMemories,
       currentPage,
       totalPages: Math.ceil(totalMemories / perPage),
-      memories,
+      items: memories.map((memory) => presentMemory(memory, req.user?._id)),
+      total: totalMemories,
+      page: currentPage,
+      hasMore: currentPage * perPage < totalMemories,
+      memories: memories.map((memory) => presentMemory(memory, req.user?._id)),
     });
   } catch (error) {
     console.error("Get approved memories error:", error);
@@ -196,12 +258,16 @@ const getMyMemories = async (req, res) => {
   try {
     const memories = await Memory.find({
       submittedBy: req.user._id,
-    }).sort({ createdAt: -1 });
+    }).populate("submittedBy", "name batch")
+      .populate("comments.user", "name")
+      .populate("reports.user", "name")
+      .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
       count: memories.length,
-      memories,
+      memories: memories.map((memory) => presentMemory(memory, req.user._id)),
+      items: memories.map((memory) => presentMemory(memory, req.user._id)),
     });
   } catch (error) {
     console.error("Error fetching my memories:", error);
@@ -221,7 +287,9 @@ const getMemoryById = async (req, res) => {
     const memory = await Memory.findOne({
       _id: id,
       status: "approved",
-    }).populate("submittedBy", "name batch");
+    }).populate("submittedBy", "name batch")
+      .populate("comments.user", "name")
+      .populate("reports.user", "name");
 
     if (!memory) {
       return res.status(404).json({
@@ -232,7 +300,7 @@ const getMemoryById = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      memory,
+      memory: presentMemory(memory, req.user?._id),
     });
   } catch (error) {
     console.error("Get memory error:", error);
@@ -249,4 +317,5 @@ module.exports = {
   getApprovedMemories,
   getMyMemories,
   getMemoryById,
+  uploadMemoryMedia,
 };

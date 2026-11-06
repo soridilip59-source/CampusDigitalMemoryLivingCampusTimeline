@@ -8,11 +8,7 @@ const notificationSchema = new mongoose.Schema(
       required: true,
     },
 
-    type: {
-      type: String,
-      enum: ["memory:submitted", "memory:approved", "memory:rejected"],
-      required: true,
-    },
+    type: { type: String, required: true },
 
     title: {
       type: String,
@@ -27,8 +23,9 @@ const notificationSchema = new mongoose.Schema(
     memory: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Memory",
-      required: true,
     },
+    actorName: { type: String, default: "" },
+    text: { type: String, default: "" },
 
     isRead: {
       type: Boolean,

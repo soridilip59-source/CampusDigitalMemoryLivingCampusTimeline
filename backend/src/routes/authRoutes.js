@@ -7,6 +7,7 @@ const router = express.Router();
 const {
     register,
     login,
+    googleLogin,
     getMe
 }= require("../controllers/authController");
 
@@ -18,6 +19,8 @@ router.post("/register",authLimiter,registerValidator,validateRequest, register)
 
 //POST /api/auth/login
 router.post("/login",authLimiter,loginValidator,validateRequest, login);
+
+router.post("/google", authLimiter, googleLogin);
 
 router.get("/me", protect, getMe);
 

@@ -1,6 +1,6 @@
 # Campus Digital Memory · Living Campus Timeline
 
-A React 18 + Vite + Tailwind frontend for collecting and exploring campus memories. The frontend uses a mock API backed by IndexedDB; the mock is initialized from seed data and migrates the previous `cdm_db_v1` localStorage database on first use. Saved-memory IDs, theme settings, and the selected accent remain in localStorage.
+A React 18 + Vite + Tailwind frontend and Express + MongoDB backend for collecting and exploring campus memories. The frontend includes an IndexedDB mock mode for local demos; configure the environment files to use the real API, Google login, Cloudinary uploads, and Socket.IO updates.
 
 ## Features
 
@@ -29,12 +29,22 @@ A React 18 + Vite + Tailwind frontend for collecting and exploring campus memori
 ## Run locally
 
 ```bash
-cd frontend
+cd backend
+copy .env.example .env
 npm install
 npm run dev
 ```
 
-Build with `npm run build`; run the mock API syntax check with `npm run check`. Demo accounts are `student@campus.com` / `student123` and `admin@campus.com` / `admin123`.
+In another terminal:
+
+```bash
+cd frontend
+copy .env.example .env
+npm install
+npm run dev
+```
+
+Fill in MongoDB, JWT, and Cloudinary values in `backend/.env`. Add the same Google OAuth Web client ID to `GOOGLE_CLIENT_ID` in the backend env and `VITE_GOOGLE_CLIENT_ID` in the frontend env; authorize `http://localhost:5173` in Google Cloud Console. Set `VITE_USE_MOCK=true` for the seeded demo mode. Build the frontend with `npm run build` and run the mock API syntax check with `npm run check`.
 
 ## Folder structure
 
@@ -48,5 +58,5 @@ frontend/src/
   routes/       application routes
   styles/       global styles, responsive rules, and design tokens
   utils/        constants, date formatting, image compression, saved IDs, realtime
-backend/        existing scaffold; not used by the frontend demo
+backend/        Express API, MongoDB models, Google authentication, and Socket.IO
 ```
